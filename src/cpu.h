@@ -4,24 +4,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define SF_Carry                    0b00000001U
-#define SF_Zero                     0b00000010U
-#define SF_InterruptDisable         0b00000100U
-#define SF_DecimalMode              0b00001000U
-#define SF_BreakCommand             0b00010000U
-#define SF_UNUSED                   0b00100000U
-#define SF_Overflow                 0b01000000U
-#define SF_Negative                 0b10000000U
-
-#define SFPos_Carry                 0U
-#define SFPos_Zero                  1U
-#define SFPos_InterruptDisable      2U
-#define SFPos_DecimalMode           3U
-#define SFPos_BreakCommand          4U
-#define SFPos_UNUSED                5U
-#define SFPos_Overflow              6U
-#define SFPos_Negative              7U
-
 #define Stack_Start                 0x0100U
 #define InternalRAM_Size            0x0800U
 #define PPU_Size                    0x0008U
@@ -105,6 +87,8 @@ uint8_t FlipByteSign(uint8_t value);
 uint8_t SetBit(uint8_t value, uint8_t bit);
 uint8_t ClearBit(uint8_t value, uint8_t bit);
 uint8_t CheckBit(uint8_t value, uint8_t bit);
+void OverrideBit8(uint8_t* addr, uint8_t bit, uint8_t value);
+void OverrideBit16(uint16_t* addr, uint8_t bit, uint8_t value);
 
 uint8_t GetZeroPage(uint8_t index);
 uint8_t GetZeroPageX(uint8_t index);
@@ -126,8 +110,13 @@ uint16_t GetIndirectAddr(uint16_t lookupAddr);
 uint16_t GetIndirectZPAddrX(uint8_t zpAddr);
 uint16_t GetIndirectZPAddrY(uint8_t zpAddr);
 
-void OnWriteToOAMDATA();
-void OnWriteToOAMDMA();
+
+void ReadPPUSTATUS();
+
+void WriteToPPUCTRL();
+void WriteToPPUSCROLL();
+void WriteToOAMDATA();
+void WriteToOAMDMA();
 
 void CheckSetSFZero(uint8_t value);
 void CheckSetSFNegative(uint8_t value);

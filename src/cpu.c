@@ -1,7 +1,26 @@
 #include <cpu.h>
+#include <console.h>
 #include <ppu.h>
 #include <rom.h>
 #include <stdlib.h>
+
+#define SF_Carry                    0b00000001U
+#define SF_Zero                     0b00000010U
+#define SF_InterruptDisable         0b00000100U
+#define SF_DecimalMode              0b00001000U
+#define SF_BreakCommand             0b00010000U
+#define SF_UNUSED                   0b00100000U
+#define SF_Overflow                 0b01000000U
+#define SF_Negative                 0b10000000U
+
+#define SFPos_Carry                 0U
+#define SFPos_Zero                  1U
+#define SFPos_InterruptDisable      2U
+#define SFPos_DecimalMode           3U
+#define SFPos_BreakCommand          4U
+#define SFPos_UNUSED                5U
+#define SFPos_Overflow              6U
+#define SFPos_Negative              7U
 
 CPU* CCPU = NULL;
 uint8_t* CPUMemory = NULL;
@@ -26,7 +45,7 @@ void RunTestProgram() {
         uint8_t instruction = ReadInstruction();
 
         sprintf(buffer, "Addr: %04X, Instruction: %02X.    Next two bytes: %02X, %02X\n", CCPU->PC - 1, instruction, CPUMemory[CCPU->PC], CPUMemory[CCPU->PC + 1]);
-        printf(buffer);
+        //printf(buffer);
 
         if (recentOpcode[alternate] == instruction) {
             recentCount[alternate] += 1;
@@ -51,7 +70,7 @@ void RunTestProgram() {
     }
 
     sprintf(buffer, "Acc: %u, X: %u, Y: %u, SP: 0x%02X, PC: 0x%04X\n", CCPU->Accumulator, CCPU->RegX, CCPU->RegY, CCPU->SP, CCPU->PC);
-    printf(buffer);
+    //printf(buffer);
 
     DumpMemory();
 }
@@ -198,43 +217,51 @@ void BitwiseAccInstruction(AddrMode am, BitwiseOp op) {
     switch (am) {
         case AM_Immediate: // 2 cycles
             number = value;
+            UseCPUCycles(2U);
             break;
 
         case AM_ZeroPage: // 3 cycles
             number = GetZeroPage(value);
+            UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageX: // 4 cycles
             number = GetZeroPageX(value);
+            UseCPUCycles(4U);
             break;
 
         case AM_Absolute: { // 4 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             number = GetAbsolute(index);
+            UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteX: { // 4 cycles (5 if crossing pages)
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             number = GetAbsoluteX(index);
+            UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteY: { // 4 cycles (5 if crossing pages)
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             number = GetAbsoluteY(index);
+            UseCPUCycles(4U);
             break;
         }
 
         case AM_IndirectX: { // 6 cycles
             uint16_t index = GetIndirectZPAddrX(value);
             number = GetAbsolute(index);
+            UseCPUCycles(6U);
             break;
         }
 
         case AM_IndirectY: { // 5 cycles (6 if page crossing)
             uint16_t index = GetIndirectZPAddrY(value);
             number = GetAbsolute(index);
+            UseCPUCycles(5U);
             break;
         }
         
@@ -266,6 +293,18 @@ uint8_t ClearBit(uint8_t value, uint8_t bit) {
 
 uint8_t CheckBit(uint8_t value, uint8_t bit) {
     return ((value >> bit) & (uint8_t)1);
+}
+
+void OverrideBit8(uint8_t* addr, uint8_t bit, uint8_t value) {
+    uint8_t newByte = *addr;
+    newByte = (newByte & ~((uint8_t)1 << bit)) | ((uint8_t)value << bit);
+    *addr = newByte;
+}
+
+void OverrideBit16(uint16_t* addr, uint8_t bit, uint8_t value) {
+    uint16_t newBytes = *addr;
+    newBytes = (newBytes & ~((uint16_t)1 << bit)) | ((uint16_t)value << bit);
+    *addr = newBytes;
 }
 
 
@@ -312,6 +351,15 @@ uint8_t GetAbsolute(uint16_t index) {
         index = (index % (uint16_t)PPU_Size) + (uint16_t)PPU_Start;
     }
 
+    switch (index) {
+        case PPU_PPUSTATUS:
+            ReadPPUSTATUS();
+            break;
+        
+        default:
+            break;
+    }
+
     return CPUMemory[index];
 }
 
@@ -326,8 +374,6 @@ uint8_t GetAbsoluteY(uint16_t index) {
 }
 
 void StoreAbsolute(uint16_t index, const uint8_t value) {
-    //printf("Storing to Absolute memory, i%04X v%02X\n", index, value);
-
     // 2KiB internal RAM mirrors 3 times from 0x800 to 0x1FFF
     if ((uint16_t)PPU_Start > index && index > (uint16_t)InternalRAM_Size) {
         index = index % (uint16_t)InternalRAM_Size;
@@ -338,14 +384,24 @@ void StoreAbsolute(uint16_t index, const uint8_t value) {
     }
 
     switch (index) {
+        case PPU_PPUCTRL:
+            CPUMemory[index] = value;
+            WriteToPPUCTRL();
+            break;
+
+        case PPU_PPUSCROLL:
+            CPUMemory[index] = value;
+            WriteToPPUSCROLL();
+            break;
+
         case PPU_OAMDATA:
             CPUMemory[index] = value;
-            OnWriteToOAMDATA();
+            WriteToOAMDATA();
             break;
 
         case OAMDMA:
             CPUMemory[index] = value;
-            OnWriteToOAMDMA();
+            WriteToOAMDMA();
             break;
         
         default:
@@ -392,14 +448,26 @@ uint16_t GetIndirectZPAddrY(uint8_t zpAddr) {
 }
 
 
-void OnWriteToOAMDATA() {
-    WriteToOAM();
+void ReadPPUSTATUS() {
+    OnReadPPUSTATUS();
+}
+
+void WriteToPPUCTRL() {
+    OnWriteToPPUCTRL();
+}
+
+void WriteToPPUSCROLL() {
+    OnWriteToPPUSCROLL();
+}
+
+void WriteToOAMDATA() {
+    OnWriteToOAMDATA();
 
     uint8_t* oamAddr = &CPUMemory[PPU_OAMADDR];
     *oamAddr++;
 }
 
-void OnWriteToOAMDMA() {
+void WriteToOAMDMA() {
     const uint8_t highbyte = CPUMemory[OAMDMA];
     const uint16_t startIndex = AssembleAbsoluteAddress(0U, highbyte);
 
@@ -411,7 +479,7 @@ void OnWriteToOAMDMA() {
     for (size_t i = 0; i < 256; i++) { // 2 cycles per loop
         *oamData = *addr;
 
-        WriteToOAM();
+        OnWriteToOAMDATA();
 
         addr++;
         *oamAddr++;

@@ -1,7 +1,7 @@
 TARGET_EXEC := NESemu
 
 BUILD_DIR := ./build
-SRC_DIRS := ./src
+SRC_DIRS := ./src ./SDL3-3.4.14/x86_64-w64-mingw32/include
 
 # Find all the C and C++ files we want to compile
 # Note the single quotes around the * expressions. The shell will incorrectly expand these otherwise, but we want to send the * directly to the find command.
@@ -15,6 +15,9 @@ OBJS := $(SRCS:%=$(BUILD_DIR)/%.o)
 # As an example, ./build/hello.cpp.o turns into ./build/hello.cpp.d
 DEPS := $(OBJS:.o=.d)
 
+LDFLAGS = -L./SDL3-3.4.14/x86_64-w64-mingw32/lib
+LDLIBS = -lSDL3
+
 # Every folder in ./src will need to be passed to GCC so that it can find header files
 INC_DIRS := $(shell find $(SRC_DIRS) -type d)
 # Add a prefix to INC_DIRS. So moduleA would become -ImoduleA. GCC understands this -I flag
@@ -26,7 +29,8 @@ CPPFLAGS := $(INC_FLAGS) -MMD -MP
 
 # The final build step.
 $(BUILD_DIR)/$(TARGET_EXEC): $(OBJS)
-	$(CXX) $(OBJS) -o $@ $(LDFLAGS)
+	$(CXX) $(OBJS) -o $@ $(LDFLAGS) $(LDLIBS)
+	cp ./SDL3-3.4.14/x86_64-w64-mingw32/bin/SDL3.dll ./build/SDL3.dll
 
 # Build step for C source
 $(BUILD_DIR)/%.c.o: %.c

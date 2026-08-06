@@ -3,7 +3,75 @@
 #include <string.h>
 #include <stdlib.h>
 
+SDL_Window* Window = NULL;
+SDL_Renderer* Renderer = NULL;
+
+int DesiredFrameTime;
+uint64_t NextFrameTime = 0;
+
 FILE* file = NULL;
+
+SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        SDL_Log("Couldn't initialise SDL: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    if (!SDL_CreateWindowAndRenderer("NES Emulator, Maybe", Window_Width, Window_Height, SDL_WINDOW_RESIZABLE, &Window, &Renderer)) {
+        SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
+    }
+
+    SDL_SetRenderLogicalPresentation(Renderer, Window_Width, Window_Height, SDL_LOGICAL_PRESENTATION_LETTERBOX);
+
+    // Calculates the amount of time a frame should ideally take in nanoseconds to sustain the set framerate
+	DesiredFrameTime = 1000000000 / DesiredFrameRateNTSC;
+
+    NextFrameTime = SDL_GetTicksNS();
+
+    TestFnc();
+
+    return SDL_APP_CONTINUE;  /* carry on with the program! */
+}
+
+/* This function runs when a new event (mouse input, keypresses, etc) occurs. */
+SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
+    if(event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_ESCAPE) {
+        return SDL_APP_SUCCESS;
+    }
+
+    if (event->type == SDL_EVENT_QUIT) {
+        return SDL_APP_SUCCESS;  /* end the program, reporting success to the OS. */
+    }
+
+    return SDL_APP_CONTINUE;  /* carry on with the program! */
+}
+
+/* This function runs once per frame, and is the heart of the program. */
+SDL_AppResult SDL_AppIterate(void* appstate) {
+    SDL_SetRenderDrawColor(Renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);  /* black, full alpha */
+    SDL_RenderClear(Renderer);  /* start with a blank canvas. */
+    SDL_SetRenderDrawColor(Renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);  /* white, full alpha */
+
+    SDL_RenderPresent(Renderer);  /* put it all on the screen! */
+
+    const uint64_t now = SDL_GetTicksNS();
+	const uint64_t executionTime = now - NextFrameTime;
+
+	if (executionTime < DesiredFrameTime) {
+		SDL_DelayNS(DesiredFrameTime - executionTime);
+	}
+
+	NextFrameTime += DesiredFrameTime;
+
+    return SDL_APP_CONTINUE;  /* carry on with the program! */
+}
+
+/* This function runs once at shutdown. */
+void SDL_AppQuit(void* appstate, SDL_AppResult result) {
+    /* SDL will clean up the window/renderer for us. */
+}
+
 
 void TestFnc() {
     Initialisation();

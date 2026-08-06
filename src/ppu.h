@@ -35,6 +35,11 @@
 
 
 typedef struct PPU {
+    uint16_t RegV;  // Current VRAM address. 15 bits - use setter for this register
+    uint16_t RegT;  // Temp. VRAM address. 15 bits - use setter for this register
+    uint8_t RegX;   // Fine X scroll. 3 bits - use setter for this register
+    uint8_t RegW;   // Write latch, to distinguish first or second write. 1 bit - unless flipping, use setter for this register
+
     uint8_t* PPUCTRL;
     uint8_t* PPUMASK;
     uint8_t* PPUSTATUS;
@@ -46,6 +51,101 @@ typedef struct PPU {
     uint8_t OAM[256];
 } PPU;
 
+/* Register values
+
+PPUCTRL
+7  bit  0
+---- ----
+VPHB SINN
+|||| ||||
+|||| ||++- Base nametable address
+|||| ||    (0 = $2000; 1 = $2400; 2 = $2800; 3 = $2C00)
+|||| |+--- VRAM address increment per CPU read/write of PPUDATA
+|||| |     (0: add 1, going across; 1: add 32, going down)
+|||| +---- Sprite pattern table address for 8x8 sprites
+||||       (0: $0000; 1: $1000; ignored in 8x16 mode)
+|||+------ Background pattern table address (0: $0000; 1: $1000)
+||+------- Sprite size (0: 8x8 pixels; 1: 8x16 pixels)
+|+-------- PPU master/slave select
+|          (0: read backdrop from EXT pins; 1: output color on EXT pins)
++--------- Vblank NMI enable (0: off, 1: on)
+
+
+PPUMASK
+7  bit  0
+---- ----
+BGRs bMmG
+|||| ||||
+|||| |||+- Greyscale (0: normal colour, 1: greyscale)
+|||| ||+-- 1: Show background in leftmost 8 pixels of screen, 0: Hide
+|||| |+--- 1: Show sprites in leftmost 8 pixels of screen, 0: Hide
+|||| +---- 1: Enable background rendering
+|||+------ 1: Enable sprite rendering
+||+------- Emphasise red (green on PAL/Dendy)
+|+-------- Emphasise green (red on PAL/Dendy)
++--------- Emphasise blue
+
+
+PPUSTATUS
+7  bit  0
+---- ----
+VSOx xxxx
+|||| ||||
+|||+-++++- (PPU open bus or 2C05 PPU identifier)
+||+------- Sprite overflow flag
+|+-------- Sprite 0 hit flag
++--------- Vblank flag, cleared on read
+
+
+OAMADDR
+7  bit  0
+---- ----
+AAAA AAAA
+|||| ||||
+++++-++++- OAM address
+
+
+OAMDATA
+7  bit  0
+---- ----
+DDDD DDDD
+|||| ||||
+++++-++++- OAM data
+
+
+PPUSCROLL
+1st write
+7  bit  0
+---- ----
+XXXX XXXX
+|||| ||||
+++++-++++- X scroll bits 7-0 (bit 8 in PPUCTRL bit 0)
+
+2nd write
+7  bit  0
+---- ----
+YYYY YYYY
+|||| ||||
+++++-++++- Y scroll bits 7-0 (bit 8 in PPUCTRL bit 1)
+
+
+PPUADDR
+1st write  2nd write
+15 bit  8  7  bit  0
+---- ----  ---- ----
+..AA AAAA  AAAA AAAA
+  || ||||  |||| ||||
+  ++-++++--++++-++++- VRAM address
+
+
+PPUDATA
+7  bit  0
+---- ----
+DDDD DDDD
+|||| ||||
+++++-++++- VRAM data
+*/
+
 typedef struct SpriteData {
     uint8_t PositionX;
     uint8_t TileIndex;
@@ -56,9 +156,28 @@ typedef struct SpriteData {
 extern PPU* CurPPU;
 extern uint8_t* PPUMemory;
 
+void PPUSetV(uint16_t value);
+void PPUSetT(uint16_t value, uint8_t clearBit);
+void PPUSetX(uint8_t value);
+void PPUSetW(uint8_t value);
+
+void PPUWrite(uint16_t index, uint8_t value);
+uint8_t PPURead(uint16_t index);
+uint8_t* PPUGetAddr(uint16_t index);
+
 void PPUInit();
 
-void WriteToOAM();
+uint16_t GetBaseNameTableAddress();
+
+void OnReadPPUSTATUS();
+void OnReadPPUDATA();
+
+void OnWriteToPPUCTRL();
+void OnWriteToPPUSCROLL();
+void OnWriteToPPUADDR();
+void OnWriteToPPUDATA();
+
+void OnWriteToOAMDATA();
 //void OAMDMA();
 
 #endif
