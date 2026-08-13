@@ -1,6 +1,10 @@
 /.vscode
 /build
 /SDL3-3.4.14
+*.nes
+*.txt
+*.zip
+*.7z
 
 # Prerequisites
 *.d

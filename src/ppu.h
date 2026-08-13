@@ -5,6 +5,36 @@
 #include <stdio.h>
 
 
+#define PPUCTRL_BaseNameTableAddrLow        0U
+#define PPUCTRL_BaseNameTableAddrHigh       1U
+#define PPUCTRL_VRAMIncrement               2U
+#define PPUCTRL_SPRPatternTableAddr         3U
+#define PPUCTRL_BGPatternTableAddr          4U
+#define PPUCTRL_SpriteSize                  5U
+#define PPUCTRL_MasterSlaveSelect           6U
+#define PPUCTRL_VBlankNMIEnable             7U
+
+#define PPUMASK_Greyscale                   0U
+#define PPUMASK_ShowBGLeftmost8PX           1U
+#define PPUMASK_ShowSPRLeftmost8PX          2U
+#define PPUMASK_EnableBGRendering           3U
+#define PPUMASK_EnableSPRRendering          4U
+#define PPUMASK_EmphasiseRed_NTSC           5U
+#define PPUMASK_EmphasiseGreen_PAL          5U
+#define PPUMASK_EmphasiseGreen_NTSC         6U
+#define PPUMASK_EmphasiseRed_PAL            6U
+#define PPUMASK_EmphasiseBlue               7U
+
+#define PPUSTATUS_OpenBus0                  0U
+#define PPUSTATUS_OpenBus1                  1U
+#define PPUSTATUS_OpenBus2                  2U
+#define PPUSTATUS_OpenBus3                  3U
+#define PPUSTATUS_OpenBus4                  4U
+#define PPUSTATUS_SpriteOverflow            5U
+#define PPUSTATUS_Sprite0Hit                6U
+#define PPUSTATUS_VBlank                    7U // Cleared on read
+
+
 // === Mapped into PPU addressing ===
 
 #define PatternTable_Size           0x1000U
@@ -39,6 +69,7 @@ typedef struct PPU {
     uint16_t RegT;  // Temp. VRAM address. 15 bits - use setter for this register
     uint8_t RegX;   // Fine X scroll. 3 bits - use setter for this register
     uint8_t RegW;   // Write latch, to distinguish first or second write. 1 bit - unless flipping, use setter for this register
+    uint8_t OpenBus;
 
     uint8_t* PPUCTRL;
     uint8_t* PPUMASK;
@@ -49,6 +80,7 @@ typedef struct PPU {
     uint8_t* PPUADDR;
     uint8_t* PPUDATA;
     uint8_t OAM[256];
+    uint8_t SecOAM[32];
 } PPU;
 
 /* Register values
@@ -146,6 +178,11 @@ DDDD DDDD
 ++++-++++- VRAM data
 */
 
+typedef struct PatternTile {
+    uint8_t BitPlane1[8];
+    uint8_t BitPlane2[8];
+} PatternTile;
+
 typedef struct SpriteData {
     uint8_t PositionX;
     uint8_t TileIndex;
@@ -155,6 +192,8 @@ typedef struct SpriteData {
 
 extern PPU* CurPPU;
 extern uint8_t* PPUMemory;
+
+extern uint32_t Palette_NTSC[64];
 
 void PPUSetV(uint16_t value);
 void PPUSetT(uint16_t value, uint8_t clearBit);
@@ -167,6 +206,8 @@ uint8_t* PPUGetAddr(uint16_t index);
 
 void PPUInit();
 
+uint16_t GetBaseSPRPatternTableAddress();
+uint16_t GetBaseBGPatternTableAddress();
 uint16_t GetBaseNameTableAddress();
 
 void OnReadPPUSTATUS();
@@ -178,6 +219,10 @@ void OnWriteToPPUADDR();
 void OnWriteToPPUDATA();
 
 void OnWriteToOAMDATA();
+
+void DumpPPU();
+void DumpPPUWriteLine(FILE* file, uint16_t startAddr);
+void DumpOAM(FILE* file);
 //void OAMDMA();
 
 #endif

@@ -25,6 +25,8 @@
 #define PPU_PPUDATA                 0x2007U
 
 #define OAMDMA                      0x4014U
+#define JOYPAD0                     0x4016U
+#define JOYPAD1                     0x4017U
 
 
 typedef struct CPU {
@@ -110,12 +112,19 @@ uint16_t GetIndirectAddr(uint16_t lookupAddr);
 uint16_t GetIndirectZPAddrX(uint8_t zpAddr);
 uint16_t GetIndirectZPAddrY(uint8_t zpAddr);
 
+uint8_t IsPageCrossed8(uint8_t prev, uint8_t next);
+uint8_t IsPageCrossed16(uint16_t prev, uint16_t next);
+
+void TriggerNMI();
+
 
 void ReadPPUSTATUS();
 
 void WriteToPPUCTRL();
 void WriteToPPUSCROLL();
 void WriteToOAMDATA();
+void WriteToPPUADDR();
+void WriteToPPUDATA();
 void WriteToOAMDMA();
 
 void CheckSetSFZero(uint8_t value);
@@ -126,6 +135,7 @@ uint8_t ReadInstruction();
 void ExecuteInstruction(uint8_t opcode);
 
 void BitwiseAccInstruction(AddrMode am, BitwiseOp op);
+void BranchInstruction(uint8_t regpos, uint8_t sign); // sign = 1 (set)/0 (clear)
 
 void ADC(AddrMode am);
 

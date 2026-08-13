@@ -16,14 +16,21 @@
 
 extern SDL_Window* Window;
 extern SDL_Renderer* Renderer;
+extern SDL_Texture* BGTexture;
+extern SDL_Texture* SPRTexture;
 extern uint64_t NextFrameTime;
 
 extern FILE* file;
+extern uint8_t ROMLoaded;
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]);
 SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event);
 SDL_AppResult SDL_AppIterate(void* appstate);
 void SDL_AppQuit(void* appstate, SDL_AppResult result);
+
+SDL_Surface* GetSurface();
+
+void HandleNESInput();
 
 void TestFnc();
 void Initialisation();
