@@ -29,7 +29,7 @@ CPPFLAGS := $(INC_FLAGS) -MMD -MP
 
 # The final build step.
 $(BUILD_DIR)/$(TARGET_EXEC): $(OBJS)
-	$(CXX) $(OBJS) -o $@ $(LDFLAGS) $(LDLIBS) #-mwindows
+	$(CXX) $(OBJS) -o $@ $(LDFLAGS) $(LDLIBS) -mwindows
 	cp ./SDL3-3.4.14/x86_64-w64-mingw32/bin/SDL3.dll ./build/SDL3.dll
 
 # Build step for C source

@@ -31,9 +31,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     SDL_SetDefaultTextureScaleMode(Renderer, SDL_SCALEMODE_PIXELART);
 
     BGTexture = SDL_CreateTexture(Renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET, 256, 240);
-    //SPRTexture = SDL_CreateTexture(Renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET, 256, 240);
+    SPRTexture = SDL_CreateTexture(Renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, 256, 240);
 
     if (!BGTexture) {
+        SDL_Log("Texture could not be created: %s", SDL_GetError());
+    }
+    if (!SPRTexture) {
         SDL_Log("Texture could not be created: %s", SDL_GetError());
     }
 
@@ -42,7 +45,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
 
     NextFrameTime = SDL_GetTicksNS();
 
-    TestFnc();
+    EmulatorStart();
 
     return SDL_APP_CONTINUE;  /* carry on with the program! */
 }
@@ -85,6 +88,10 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 
             case SDLK_Z:
                 Input0.AHeld = true;
+                break;
+
+            case SDLK_SPACE:
+                StopExecution = !StopExecution;
                 break;
 
             default:
@@ -142,6 +149,11 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 SDL_AppResult SDL_AppIterate(void* appstate) {
     if (ROMLoaded) {
         if (!StopExecution) {
+            //SDL_SetRenderTarget(Renderer, SPRTexture);
+            //SDL_SetRenderDrawColor(Renderer, 0, 0, 0, 0);
+            //RenderClear(Renderer);
+            //SDL_SetRenderTarget(Renderer, NULL);
+
             HandleNESInput();
 
             if (System == SYS_NTSC) {
@@ -168,10 +180,16 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     //SDL_SetRenderDrawColor(Renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);  /* white, full alpha */
 
     if (!SDL_UpdateTexture(BGTexture, NULL, BGFrameBuffer, 256 * sizeof(uint8_t) * 3)) {
-        SDL_Log("Can't update texture: %s", SDL_GetError());
+        SDL_Log("Can't update BG texture: %s", SDL_GetError());
+    }
+    if (!SDL_UpdateTexture(SPRTexture, NULL, SPRFrameBuffer, 256 * sizeof(uint8_t) * 4)) {
+        SDL_Log("Can't update SPR texture: %s", SDL_GetError());
     }
     if (!SDL_RenderTexture(Renderer, BGTexture, NULL, NULL)) {
-        SDL_Log("Can't render texture: %s", SDL_GetError());
+        SDL_Log("Can't render BG texture: %s", SDL_GetError());
+    }
+    if (!SDL_RenderTexture(Renderer, SPRTexture, NULL, NULL)) {
+        SDL_Log("Can't render SPR texture: %s", SDL_GetError());
     }
     if (!SDL_RenderPresent(Renderer)) {
         SDL_Log("Can't render present: %s", SDL_GetError());
@@ -199,23 +217,21 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
 }
 
 void HandleNESInput() {
-    InputBuffer0 = 0;
+    Input0Conv = 0;
 
     uint8_t* inputAddr = (uint8_t*)&Input0;
 
     for (size_t i = 0; i < 8; i++) {
-        InputBuffer0 = InputBuffer0 | (inputAddr[i] << i);
+        Input0Conv = Input0Conv | (inputAddr[i] << i);
+    }
+
+    if (CheckBit(JOY0Latch, 0U)) {
+        Input0Buffer = Input0Conv;
     }
 }
 
-SDL_Surface* GetSurface() {
-    return SDL_GetWindowSurface(Window);
-}
-
-
-void TestFnc() {
+void EmulatorStart() {
     Initialisation();
-    //LoadFile();
     LoadROM();
     SetupConsole();
 }
@@ -225,30 +241,10 @@ void Initialisation() {
     PPUInit();
 }
 
-void LoadFile() {
-    uint8_t testbuffer[8] = { 0 };
-
-    file = fopen("testhex.bin", "rb");
-    fread(testbuffer, 1, sizeof(testbuffer), file);
-
-    memcpy(&CPUMemory[ROM_Start], testbuffer, sizeof(testbuffer));
-
-    uint8_t buffer[32];
-
-    for (size_t i = 0; i < 8; i++) {
-        sprintf(buffer, "%X\n", testbuffer[i]);
-        printf(buffer);
-    }
-
-    fclose(file);
-
-    RunTestProgram();
-}
-
 void LoadROM() {
     uint8_t headerBuffer[16] = { 0 };
 
-    file = fopen("AccuracyCoin.nes", "rb");
+    file = fopen("Super Mario Bros. (World).nes", "rb");
     fread(headerBuffer, 1, sizeof(headerBuffer), file);
 
     if (!CurROM) {
@@ -275,8 +271,6 @@ void LoadROM() {
     fclose(file);
 
     ROMLoaded = 1;
-
-    //RunTestProgram();
 }
 
 void ParseHeader(uint8_t* header) {

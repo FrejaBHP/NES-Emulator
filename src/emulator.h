@@ -28,13 +28,10 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event);
 SDL_AppResult SDL_AppIterate(void* appstate);
 void SDL_AppQuit(void* appstate, SDL_AppResult result);
 
-SDL_Surface* GetSurface();
-
 void HandleNESInput();
 
-void TestFnc();
+void EmulatorStart();
 void Initialisation();
-void LoadFile();
 void LoadROM();
 void ParseHeader(uint8_t* header);
 

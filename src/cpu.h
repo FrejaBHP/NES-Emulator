@@ -24,9 +24,35 @@
 #define PPU_PPUADDR                 0x2006U
 #define PPU_PPUDATA                 0x2007U
 
+// APU registers
+
+#define SQ1_VOL                     0x4000U     // Duty cycle and volume
+#define SQ1_SWEEP                   0x4001U     // Sweep control register
+#define SQ1_LO                      0x4002U     // Low byte of period
+#define SQ1_HI                      0x4003U     // High byte of period and length counter value
+#define SQ2_VOL                     0x4004U     // Duty cycle and volume
+#define SQ2_SWEEP                   0x4005U     // Sweep control register
+#define SQ2_LO                      0x4006U     // Low byte of period
+#define SQ2_HI                      0x4007U     // High byte of period and length counter value
+
+#define TRI_LINEAR                  0x4008U     // Linear counter
+#define TRI_UNUSED                  0x4009U     // Unused
+#define TRI_LO                      0x400AU     // Low byte of period
+#define TRI_HI                      0x400BU     // High byte of period and length counter value
+
+#define NOISE_VOL                   0x400CU     // Volume
+#define NOISE_UNUSED                0x400DU     // Unused
+#define NOISE_LO                    0x400EU     // Period and waveform shape
+#define NOISE_HI                    0x400FU     // Length counter value
+
+#define DMC_FREQ                    0x4010U     // IRQ enable (I), Looping (L), and Frequency (R) (IL-- RRRR)
+#define DMC_RAW                     0x4011U     // Load counter (D) (-DDD DDDD)
+#define DMC_START                   0x4012U     // Sample address (A) (AAAA AAAA)
+#define DMC_LEN                     0x4013U     // Sample length (L) (LLLL LLLL)
 #define OAMDMA                      0x4014U
-#define JOYPAD0                     0x4016U
-#define JOYPAD1                     0x4017U
+#define SND_CHN                     0x4015U     // Sound channels, but also IRQ status. Internal register, so does not update data bus
+#define JOY0                        0x4016U     // First controller input
+#define JOY1                        0x4017U     // Second controller input, doubles as APU Frame Counter
 
 
 typedef struct CPU {
@@ -36,6 +62,7 @@ typedef struct CPU {
     uint8_t RegX;
     uint8_t RegY;
     uint8_t Status;
+    uint8_t DataBus;
 } CPU;
 
 typedef enum AddrMode {
@@ -66,13 +93,14 @@ typedef enum BitwiseOp {
 extern CPU* CCPU;
 extern uint8_t* CPUMemory;
 
+extern uint8_t JOY0Latch;
+extern uint8_t JOY1Latch;
+
 void CPUInit();
 
 void DumpMemory();
 void DumpWriteLine(FILE* file, uint16_t startAddr);
 void DumpWriteLineHalf(FILE* file, uint16_t startAddr);
-
-void RunTestProgram();
 
 uint8_t ReadByte(); // Somehow use a cycle
 uint8_t WriteByte(); // Somehow use a cycle
@@ -115,10 +143,11 @@ uint16_t GetIndirectZPAddrY(uint8_t zpAddr);
 uint8_t IsPageCrossed8(uint8_t prev, uint8_t next);
 uint8_t IsPageCrossed16(uint16_t prev, uint16_t next);
 
+void GoToIRQ();
 void TriggerNMI();
 
-
 void ReadPPUSTATUS();
+void ReadPPUDATA();
 
 void WriteToPPUCTRL();
 void WriteToPPUSCROLL();
@@ -131,7 +160,6 @@ void CheckSetSFZero(uint8_t value);
 void CheckSetSFNegative(uint8_t value);
 
 uint8_t ReadProgramByte();
-uint8_t ReadInstruction();
 void ExecuteInstruction(uint8_t opcode);
 
 void BitwiseAccInstruction(AddrMode am, BitwiseOp op);
@@ -218,6 +246,9 @@ void CLD();
 
 void CLV();
 
-void NOP();
+void NOP(AddrMode am);
+
+
+void SLO(AddrMode am);
 
 #endif

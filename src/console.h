@@ -21,6 +21,13 @@ typedef struct ControllerInput {
     bool RightHeld;
 } ControllerInput;
 
+typedef struct SpriteData {
+    uint8_t PositionY;
+    uint8_t TileIndex;
+    uint8_t Attributes;
+    uint8_t PositionX;
+} SpriteData;
+
 // Horizontal resolution is 256, with 85 extra for the horizontal blanking period, making up 256 + 85 = 341 scanline length
 #define Scanline_Length         341 // in PPU pixels/cycles
 #define HBlank_Length            85 // in PPU pixels/cycles
@@ -60,11 +67,14 @@ extern uint16_t CurDot;
 extern uint8_t* BGFrameBuffer;
 extern uint8_t* SPRFrameBuffer;
 
+extern uint8_t DMAOccured;
+
 extern uint8_t StopExecution;
 extern uint8_t HasAnnouncedStop;
 
 extern ControllerInput Input0;
-extern uint8_t InputBuffer0;
+extern uint8_t Input0Conv;
+extern uint8_t Input0Buffer;
 
 void SetupConsole();
 void ResetFrameCount();
@@ -77,6 +87,9 @@ uint8_t IsVisibleOnScanline(uint8_t scanline, uint8_t topY);
 void RunCPU(uint32_t timestamp);
 void RunPPU(uint32_t timestamp);
 
-void DrawFrame();
+void DrawBGLayer();
+void GetValidSPR(SpriteData* sprites);
+void DrawSPRLayer();
+void DrawSPR(SpriteData* spr);
 
 #endif

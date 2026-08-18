@@ -69,7 +69,8 @@ typedef struct PPU {
     uint16_t RegT;  // Temp. VRAM address. 15 bits - use setter for this register
     uint8_t RegX;   // Fine X scroll. 3 bits - use setter for this register
     uint8_t RegW;   // Write latch, to distinguish first or second write. 1 bit - unless flipping, use setter for this register
-    uint8_t OpenBus;
+    uint8_t DataBus;
+    uint8_t DataReadBuffer;
 
     uint8_t* PPUCTRL;
     uint8_t* PPUMASK;
@@ -178,22 +179,11 @@ DDDD DDDD
 ++++-++++- VRAM data
 */
 
-typedef struct PatternTile {
-    uint8_t BitPlane1[8];
-    uint8_t BitPlane2[8];
-} PatternTile;
-
-typedef struct SpriteData {
-    uint8_t PositionX;
-    uint8_t TileIndex;
-    uint8_t Attributes;
-    uint8_t PositionY;
-} SpriteData;
-
 extern PPU* CurPPU;
 extern uint8_t* PPUMemory;
 
 extern uint32_t Palette_NTSC[64];
+extern uint32_t Palette_NTSC_old[64];
 
 void PPUSetV(uint16_t value);
 void PPUSetT(uint16_t value, uint8_t clearBit);

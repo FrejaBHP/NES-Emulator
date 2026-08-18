@@ -22,57 +22,27 @@
 #define SFPos_Overflow              6U
 #define SFPos_Negative              7U
 
+#define SCPos_Pulse1                0U
+#define SCPos_Pulse2                1U
+#define SCPos_Triangle              2U
+#define SCPos_Noise                 3U
+#define SCPos_DMC                   4U
+#define SCPos_UNUSED                5U  // Open bus
+#define SCPos_FrameInterrupt        6U
+#define SCPos_DMCInterrupt          7U
+
 CPU* CCPU = NULL;
 uint8_t* CPUMemory = NULL;
 
+uint8_t JOY0Latch = 0;
+uint8_t JOY1Latch = 0;
+
 void CPUInit() {
     CCPU = calloc(1, sizeof(CPU));
-    //CPUMemory = calloc(1, 0xFFFF);
     CPUMemory = calloc(1, 0xFFFF + 1);
 
     CCPU->SP = 0xFFU;
     CCPU->PC = ROM_Start; // temp
-}
-
-void RunTestProgram() {
-    uint8_t buffer[256];
-    bool alternate = false;
-
-    uint8_t recentOpcode[2];
-    uint8_t recentCount[2];
-
-    while(1) {
-        uint8_t instruction = ReadInstruction();
-
-        //sprintf(buffer, "Addr: %04X, Instruction: %02X.    Next two bytes: %02X, %02X\n", CCPU->PC - 1, instruction, CPUMemory[CCPU->PC], CPUMemory[CCPU->PC + 1]);
-        //printf(buffer);
-
-        if (recentOpcode[alternate] == instruction) {
-            recentCount[alternate] += 1;
-        }
-        else {
-            recentOpcode[alternate] = instruction;
-            recentCount[alternate] = 0;
-        }
-
-        if (instruction == 0) {
-            break;
-        }
-
-        if (recentCount[0] > 4 && recentCount[1] > 4) {
-            printf("Stuck looping between two instructions, breaking...\n");
-            break;
-        }
-        
-        ExecuteInstruction(instruction);
-
-        alternate = !alternate;
-    }
-
-    //sprintf(buffer, "Acc: %u, X: %u, Y: %u, SP: 0x%02X, PC: 0x%04X\n", CCPU->Accumulator, CCPU->RegX, CCPU->RegY, CCPU->SP, CCPU->PC);
-    //printf(buffer);
-
-    DumpMemory();
 }
 
 void DumpMemory() {
@@ -153,14 +123,9 @@ void DumpWriteLineHalf(FILE* file, uint16_t startAddr) {
 
 uint8_t ReadProgramByte() {
     uint8_t value = CPUMemory[CCPU->PC];
+    CCPU->DataBus = value;
     CCPU->PC++;
     return value;
-}
-
-uint8_t ReadInstruction() {
-    uint8_t instruction = CPUMemory[CCPU->PC];
-    CCPU->PC++;
-    return instruction;
 }
 
 
@@ -172,7 +137,7 @@ uint16_t AssembleAbsoluteAddress(uint8_t first, uint8_t second) {
 
 uint8_t GetHighByte(uint16_t value) {
     uint16_t temp = value;
-    temp = temp >> 8;
+    temp >>= 8;
     uint8_t highByte = (uint8_t)temp;
 
     return highByte;
@@ -194,6 +159,7 @@ uint8_t FlipByteSign(uint8_t value) {
 void PushByte(uint8_t value) {
     uint16_t index = Stack_Start + CCPU->SP;
     CPUMemory[index] = value;
+    CCPU->DataBus = value;
 
     //printf("Pushed %02hhX to %04hX\n", value, index);
 
@@ -204,6 +170,7 @@ uint8_t PopByte() {
     CCPU->SP++;
     uint16_t index = Stack_Start + CCPU->SP;
     uint8_t value = CPUMemory[index];
+    CCPU->DataBus = value;
 
     //printf("Popped %02hhX from %04hX\n", value, index);
 
@@ -236,6 +203,7 @@ void OverrideBit16(uint16_t* addr, uint8_t bit, uint8_t value) {
 
 
 uint8_t GetZeroPage(uint8_t index) {
+    CCPU->DataBus = CPUMemory[index];
     return CPUMemory[index];
 }
 
@@ -251,6 +219,7 @@ uint8_t GetZeroPageY(uint8_t index) {
 
 void StoreZeroPage(uint8_t index, const uint8_t value) {
     //printf("Storing to Zero Page, i%02X v%02X\n", index, value);
+    CCPU->DataBus = value;
     CPUMemory[index] = value;
     //printf("Zero Page i%02X = %02X\n", index, Memory[index]);
 }
@@ -281,26 +250,28 @@ uint8_t GetAbsolute(uint16_t index) {
     switch (index) {
         case PPU_PPUCTRL:
             //printf("Read %02X from %04X\n", CurPPU->OpenBus, index);
-            return CurPPU->OpenBus;
+            return CurPPU->DataBus;
             break;
 
         case PPU_PPUMASK:
             //printf("Read %02X from %04X\n", CurPPU->OpenBus, index);
-            return CurPPU->OpenBus;
+            return CurPPU->DataBus;
             break;
 
         case PPU_PPUSTATUS: {
             uint8_t status;
 
             uint8_t bits75 = *CurPPU->PPUSTATUS;
-            bits75 = bits75 >> 5;
-            bits75 = bits75 << 5;
+            bits75 >>= 5;
+            bits75 <<= 5;
 
-            uint8_t bits40 = CurPPU->OpenBus;
-            bits40 = bits40 << 3;
-            bits40 = bits40 >> 3;
+            uint8_t bits40 = CurPPU->DataBus;
+            bits40 <<= 3;
+            bits40 >>= 3;
 
             status = bits75 | bits40;
+
+            CurPPU->DataBus = status;
             
             ReadPPUSTATUS();
 
@@ -309,21 +280,22 @@ uint8_t GetAbsolute(uint16_t index) {
 
         case PPU_OAMADDR:
             //printf("Read %02X from %04X\n", CurPPU->OpenBus, index);
-            return CurPPU->OpenBus;
+            return CurPPU->DataBus;
 
         case PPU_OAMDATA:
             //printf("Read %02X from %04X\n", CurPPU->OpenBus, index);
-            return CurPPU->OpenBus;
+            return CurPPU->DataBus;
 
         case PPU_PPUSCROLL:
             //printf("Read %02X from %04X\n", CurPPU->OpenBus, index);
-            return CurPPU->OpenBus;
+            return CurPPU->DataBus;
 
         case PPU_PPUADDR:
             //printf("Read %02X from %04X\n", CurPPU->OpenBus, index);
-            return CurPPU->OpenBus;
+            return CurPPU->DataBus;
 
         case PPU_PPUDATA: {
+            /*
             uint8_t bus = CurPPU->OpenBus;
             bus = bus >> 6;
             bus = bus << 6;
@@ -333,19 +305,56 @@ uint8_t GetAbsolute(uint16_t index) {
             data = data >> 2;
 
             uint8_t retValue = bus | data;
+            */
+            uint8_t retValue = CurPPU->DataReadBuffer;
+
+            ReadPPUDATA();
             
             //printf("Read %02X from %04X\n", retValue, index);
             return retValue;
         }
 
-        case JOYPAD0:
-            uint8_t retValue = 0x40 + CheckBit(InputBuffer0, 0);
-            InputBuffer0 = InputBuffer0 >> 1;
-            
+        case SND_CHN: {
+            uint8_t retValue = CPUMemory[SND_CHN];
+            OverrideBit8(&retValue, SCPos_UNUSED, CheckBit(CCPU->DataBus, SCPos_UNUSED));
+            // Until APU is implemented, pretend no music is playing. This might break things
+            retValue >>= 5;
+            retValue <<= 5;
+
+            CPUMemory[SND_CHN] = ClearBit(CPUMemory[SND_CHN], 6U);
+
+            //OverrideBit8(&retValue, SCPos_DMC, )
             return retValue;
+        }
+
+        case JOY0: {
+            uint8_t retValue = 0x40U + CheckBit(Input0Buffer, 0);
+
+            if (!CheckBit(JOY0Latch, 0U)) {
+                Input0Buffer >>= 1;
+
+                // After 8 polls, always returns 1
+                Input0Buffer = SetBit(Input0Buffer, 7U);
+            }
+
+            return retValue;
+        }
+
+        case JOY1:
+            return CPUMemory[JOY1];
+            //return 0x40U;
 
         default:
+            // FIXME: Assuming no WRAM is mapped, add a check later
+            // BUGME: Freezes AccuracyCoin's CPU Open Bus test
+            /*
+            if (index >= 0x4000U && index < 0x8000U) {
+                return CCPU->DataBus;
+            }
+            */
+
             //printf("Read %02X from %04X\n", CPUMemory[index], index);
+            //CCPU->DataBus = CPUMemory[index];
             return CPUMemory[index];
     }
 }
@@ -387,56 +396,84 @@ void StoreAbsolute(uint16_t index, const uint8_t value) {
         return;
     }
 
+    CCPU->DataBus = value;
+
     //printf("Writing %02X to %04X\n", value, index);
 
     switch (index) {
         case PPU_PPUCTRL:
             CPUMemory[index] = value;
-            CurPPU->OpenBus = value;
+            CurPPU->DataBus = value;
             WriteToPPUCTRL();
             break;
 
         case PPU_PPUMASK:
             CPUMemory[index] = value;
-            CurPPU->OpenBus = value;
+            CurPPU->DataBus = value;
             break;
 
         case PPU_PPUSTATUS:
-            CurPPU->OpenBus = value;
+            CurPPU->DataBus = value;
             break;
 
         case PPU_OAMADDR:
             CPUMemory[index] = value;
-            CurPPU->OpenBus = value;
+            CurPPU->DataBus = value;
             break;
 
         case PPU_OAMDATA:
             CPUMemory[index] = value;
-            CurPPU->OpenBus = value;
+            CurPPU->DataBus = value;
             WriteToOAMDATA();
             break;
 
         case PPU_PPUSCROLL:
             CPUMemory[index] = value;
-            CurPPU->OpenBus = value;
+            CurPPU->DataBus = value;
             WriteToPPUSCROLL();
             break;
 
         case PPU_PPUADDR:
             CPUMemory[index] = value;
-            CurPPU->OpenBus = value;
+            CurPPU->DataBus = value;
             WriteToPPUADDR();
             break;
 
         case PPU_PPUDATA:
-            CPUMemory[index] = value;
-            CurPPU->OpenBus = value;
+            //CPUMemory[index] = value;
+            CurPPU->DataBus = value;
             WriteToPPUDATA();
             break;
 
         case OAMDMA:
             CPUMemory[index] = value;
             WriteToOAMDMA();
+            break;
+
+        case SND_CHN:
+            // FIXME: Incomplete implementation, is supposed to alter APU counters
+            uint8_t write = value;
+            write <<= 3;
+            write >>= 3;
+
+            uint8_t sndchn = CPUMemory[SND_CHN];
+            sndchn <<= 1;
+            sndchn >>= 6;
+            sndchn <<= 1;
+
+            CPUMemory[SND_CHN] = sndchn | write;
+            break;
+
+        case JOY0:
+            uint8_t latchValue = value;
+            latchValue <<= 5;
+            latchValue >>= 5;
+            JOY0Latch = latchValue;
+
+            if (CheckBit(latchValue, 0U)) {
+                Input0Buffer = Input0Conv;
+            }
+
             break;
         
         default:
@@ -460,9 +497,21 @@ void StoreAbsoluteY(uint16_t index, const uint8_t value) {
 
 uint16_t GetIndirectAddr(uint16_t lookupAddr) {
     const uint8_t first = CPUMemory[lookupAddr];
-    const uint8_t second = CPUMemory[++lookupAddr];
 
-    return AssembleAbsoluteAddress(first, second);
+    uint8_t lowByte = GetLowByte(lookupAddr);
+    if (lowByte == 0xFFU) {
+        lowByte = 0x00U;
+
+        uint8_t highByte = GetHighByte(lookupAddr);
+        uint16_t wrappedAddr = (highByte << 8) | lowByte;
+
+        const uint8_t second = CPUMemory[wrappedAddr];
+        return AssembleAbsoluteAddress(first, second);
+    }
+    else {
+        const uint8_t second = CPUMemory[++lookupAddr];
+        return AssembleAbsoluteAddress(first, second);
+    }
 }
 
 uint16_t GetIndirectZPAddrX(uint8_t zpAddr) {
@@ -510,6 +559,17 @@ uint8_t IsPageCrossed16(uint16_t prev, uint16_t next) {
     }
 }
 
+
+void GoToIRQ() {
+    if (CheckBit(CCPU->Status, SFPos_InterruptDisable)) {
+        return;
+    }
+    
+    OverrideBit8(&CCPU->Status, SFPos_InterruptDisable, 1);
+    CCPU->PC = 0xFFFEU;
+    JMP(AM_Absolute);
+}
+
 void TriggerNMI() {
     //printf("NMI triggered. Frame: %u, CPU cycle: %u\n", FrameCount, CPUCycleCount);
     uint8_t statusCopy = CCPU->Status;
@@ -533,6 +593,11 @@ void ReadPPUSTATUS() {
     OnReadPPUSTATUS();
 }
 
+void ReadPPUDATA() {
+    OnReadPPUDATA();
+}
+
+
 void WriteToPPUCTRL() {
     OnWriteToPPUCTRL();
 }
@@ -553,31 +618,22 @@ void WriteToOAMDATA() {
     UseCPUCycles(2U);
     
     OnWriteToOAMDATA();
-
-    uint8_t* oamAddr = &CPUMemory[PPU_OAMADDR];
-    *oamAddr++;
 }
 
 void WriteToOAMDMA() {
     const uint8_t highbyte = CPUMemory[OAMDMA];
-    const uint16_t startIndex = AssembleAbsoluteAddress(0U, highbyte);
-
-    uint8_t* addr = &CPUMemory[startIndex];
-
-    uint8_t* oamAddr = &CPUMemory[PPU_OAMADDR];
-    uint8_t* oamData = &CPUMemory[PPU_OAMDATA];
+    const uint16_t startIndex = (highbyte << 8) | (uint8_t)0U;
 
     for (size_t i = 0; i < 256; i++) { // 2 cycles per loop
+        const uint16_t index = startIndex + i;
+        CPUMemory[PPU_OAMDATA] = GetAbsolute(index);
+
         UseCPUCycles(2U);
 
-        *oamData = *addr;
-
         OnWriteToOAMDATA();
-
-        addr++;
-        *oamAddr++;
     }
 
+    DMAOccured = 1;
     RunPPU(CPUTimeStamp);
 }
 
@@ -610,12 +666,24 @@ void ExecuteInstruction(uint8_t opcode) {
             ORA(AM_IndirectX);
             break;
 
+        case 0x03: // Illegal
+            SLO(AM_IndirectX);
+            break;
+
+        case 0x04: // Illegal
+            NOP(AM_ZeroPage);
+            break;
+
         case 0x05:
             ORA(AM_ZeroPage);
             break;
 
         case 0x06:
             ASL(AM_ZeroPage);
+            break;
+
+        case 0x07: // Illegal
+            SLO(AM_ZeroPage);
             break;
 
         case 0x08:
@@ -630,12 +698,20 @@ void ExecuteInstruction(uint8_t opcode) {
             ASL(AM_Accumulator);
             break;
 
+        case 0x0C: // Illegal
+            NOP(AM_Absolute);
+            break;
+
         case 0x0D:
             ORA(AM_Absolute);
             break;
 
         case 0x0E:
             ASL(AM_Absolute);
+            break;
+
+        case 0x0F: // Illegal
+            SLO(AM_Absolute);
             break;
 
         case 0x10:
@@ -646,12 +722,24 @@ void ExecuteInstruction(uint8_t opcode) {
             ORA(AM_IndirectY);
             break;
 
+        case 0x13: // Illegal
+            SLO(AM_IndirectY);
+            break;
+
+        case 0x14: // Illegal
+            NOP(AM_ZeroPageX);
+            break;
+
         case 0x15:
             ORA(AM_ZeroPageX);
             break;
 
         case 0x16:
             ASL(AM_ZeroPageX);
+            break;
+
+        case 0x17: // Illegal
+            SLO(AM_ZeroPageX);
             break;
 
         case 0x18:
@@ -662,12 +750,28 @@ void ExecuteInstruction(uint8_t opcode) {
             ORA(AM_AbsoluteY);
             break;
 
+        case 0x1A: // Illegal
+            NOP(AM_Implied);
+            break;
+
+        case 0x1B: // Illegal
+            SLO(AM_AbsoluteY);
+            break;
+
+        case 0x1C: // Illegal
+            NOP(AM_AbsoluteX);
+            break;
+
         case 0x1D:
             ORA(AM_AbsoluteX);
             break;
 
         case 0x1E:
             ASL(AM_AbsoluteX);
+            break;
+
+        case 0x1F: // Illegal
+            SLO(AM_AbsoluteX);
             break;
 
         case 0x20:
@@ -722,6 +826,10 @@ void ExecuteInstruction(uint8_t opcode) {
             AND(AM_IndirectY);
             break;
 
+        case 0x34: // Illegal
+            NOP(AM_ZeroPageX);
+            break;
+
         case 0x35:
             AND(AM_ZeroPageX);
             break;
@@ -738,6 +846,14 @@ void ExecuteInstruction(uint8_t opcode) {
             AND(AM_AbsoluteY);
             break;
 
+        case 0x3A: // Illegal
+            NOP(AM_Implied);
+            break;
+
+        case 0x3C: // Illegal
+            NOP(AM_AbsoluteX);
+            break;
+
         case 0x3D:
             AND(AM_AbsoluteX);
             break;
@@ -752,6 +868,10 @@ void ExecuteInstruction(uint8_t opcode) {
 
         case 0x41:
             EOR(AM_IndirectX);
+            break;
+
+        case 0x44: // Illegal
+            NOP(AM_ZeroPage);
             break;
 
         case 0x45:
@@ -794,6 +914,10 @@ void ExecuteInstruction(uint8_t opcode) {
             EOR(AM_IndirectY);
             break;
 
+        case 0x54: // Illegal
+            NOP(AM_ZeroPageX);
+            break;
+
         case 0x55:
             EOR(AM_ZeroPageX);
             break;
@@ -810,6 +934,14 @@ void ExecuteInstruction(uint8_t opcode) {
             EOR(AM_AbsoluteY);
             break;
 
+        case 0x5A: // Illegal
+            NOP(AM_Implied);
+            break;
+
+        case 0x5C: // Illegal
+            NOP(AM_AbsoluteX);
+            break;
+
         case 0x5D:
             EOR(AM_AbsoluteX);
             break;
@@ -824,6 +956,10 @@ void ExecuteInstruction(uint8_t opcode) {
 
         case 0x61:
             ADC(AM_IndirectX);
+            break;
+
+        case 0x64: // Illegal
+            NOP(AM_ZeroPage);
             break;
 
         case 0x65:
@@ -866,6 +1002,10 @@ void ExecuteInstruction(uint8_t opcode) {
             ADC(AM_IndirectY);
             break;
 
+        case 0x74: // Illegal
+            NOP(AM_ZeroPageX);
+            break;
+
         case 0x75:
             ADC(AM_ZeroPageX);
             break;
@@ -882,6 +1022,14 @@ void ExecuteInstruction(uint8_t opcode) {
             ADC(AM_AbsoluteY);
             break;
 
+        case 0x7A: // Illegal
+            NOP(AM_Implied);
+            break;
+
+        case 0x7C: // Illegal
+            NOP(AM_AbsoluteX);
+            break;
+
         case 0x7D:
             ADC(AM_AbsoluteX);
             break;
@@ -890,8 +1038,16 @@ void ExecuteInstruction(uint8_t opcode) {
             ROR(AM_AbsoluteX);
             break;
 
+        case 0x80: // Illegal
+            NOP(AM_Immediate);
+            break;
+
         case 0x81:
             STA(AM_IndirectX);
+            break;
+
+        case 0x82: // Illegal
+            NOP(AM_Immediate);
             break;
 
         case 0x84:
@@ -908,6 +1064,10 @@ void ExecuteInstruction(uint8_t opcode) {
 
         case 0x88:
             DEY(); // Always implied
+            break;
+
+        case 0x89: // Illegal
+            NOP(AM_Immediate);
             break;
 
         case 0x8A:
@@ -1062,6 +1222,10 @@ void ExecuteInstruction(uint8_t opcode) {
             CMP(AM_IndirectX);
             break;
 
+        case 0xC2: // Illegal
+            NOP(AM_Immediate);
+            break;
+
         case 0xC4:
             CPY(AM_ZeroPage);
             break;
@@ -1106,6 +1270,10 @@ void ExecuteInstruction(uint8_t opcode) {
             CMP(AM_IndirectY);
             break;
 
+        case 0xD4: // Illegal
+            NOP(AM_ZeroPageX);
+            break;
+
         case 0xD5:
             CMP(AM_ZeroPageX);
             break;
@@ -1122,6 +1290,14 @@ void ExecuteInstruction(uint8_t opcode) {
             CMP(AM_AbsoluteY);
             break;
 
+        case 0xDA: // Illegal
+            NOP(AM_Implied);
+            break;
+
+        case 0xDC: // Illegal
+            NOP(AM_AbsoluteX);
+            break;
+
         case 0xDD:
             CMP(AM_AbsoluteX);
             break;
@@ -1136,6 +1312,10 @@ void ExecuteInstruction(uint8_t opcode) {
 
         case 0xE1:
             SBC(AM_IndirectX);
+            break;
+
+        case 0xE2: // Illegal
+            NOP(AM_Immediate);
             break;
 
         case 0xE4:
@@ -1159,7 +1339,7 @@ void ExecuteInstruction(uint8_t opcode) {
             break;
 
         case 0xEA:
-            NOP(); // Always implied
+            NOP(AM_Implied); // Always implied
             break;
 
         case 0xEC:
@@ -1182,6 +1362,10 @@ void ExecuteInstruction(uint8_t opcode) {
             SBC(AM_IndirectY);
             break;
 
+        case 0xF4: // Illegal
+            NOP(AM_ZeroPageX);
+            break;
+
         case 0xF5:
             SBC(AM_ZeroPageX);
             break;
@@ -1196,6 +1380,14 @@ void ExecuteInstruction(uint8_t opcode) {
 
         case 0xF9:
             SBC(AM_AbsoluteY);
+            break;
+
+        case 0xFA: // Illegal
+            NOP(AM_Implied);
+            break;
+
+        case 0xFC: // Illegal
+            NOP(AM_AbsoluteX);
             break;
 
         case 0xFD:
@@ -1433,7 +1625,7 @@ void ASL(AddrMode am) {
             CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
         }
 
-        number = number << 1;
+        number <<= 1;
         CCPU->Accumulator = number;
         UseCPUCycles(2U);
     }
@@ -1450,7 +1642,7 @@ void ASL(AddrMode am) {
                 CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
             }
 
-            number = number << 1;
+            number <<= 1;
             StoreZeroPage(value, number);
             UseCPUCycles(5U);
         }
@@ -1464,7 +1656,7 @@ void ASL(AddrMode am) {
                 CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
             }
 
-            number = number << 1;
+            number <<= 1;
             StoreZeroPageX(value, number);
             UseCPUCycles(6U);
         }
@@ -1479,7 +1671,7 @@ void ASL(AddrMode am) {
                 CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
             }
 
-            number = number << 1;
+            number <<= 1;
             StoreAbsolute(addr, number);
             UseCPUCycles(6U);
         }
@@ -1494,7 +1686,7 @@ void ASL(AddrMode am) {
                 CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
             }
 
-            number = number << 1;
+            number <<= 1;
             StoreAbsoluteX(addr, number);
             UseCPUCycles(7U);
         }
@@ -1668,9 +1860,10 @@ void BRK() { // 7 cycles
     PushByte(GetHighByte((CCPU->PC + 2)));
     PushByte(GetLowByte((CCPU->PC + 2)));
     PushByte(statusCopy);
-    CCPU->PC = 0xFFFEU;
 
     CCPU->Status = SetBit(CCPU->Status, SFPos_InterruptDisable);
+    CCPU->PC = 0xFFFEU;
+
     UseCPUCycles(7U);
 }
 
@@ -1751,6 +1944,10 @@ void CMP(AddrMode am) {
         CCPU->Status = ClearBit(CCPU->Status, SFPos_Zero);
     }
 
+    uint8_t result = CCPU->Accumulator - valueToCompare;
+
+    CheckSetSFNegative(result);
+
     // Something about negative flag, but I don't know what the "result" is
 }
 
@@ -1795,6 +1992,10 @@ void CPX(AddrMode am) {
         CCPU->Status = ClearBit(CCPU->Status, SFPos_Zero);
     }
 
+    uint8_t result = CCPU->RegX - valueToCompare;
+
+    CheckSetSFNegative(result);
+
     // Something about negative flag, but I don't know what the "result" is
 }
 
@@ -1838,6 +2039,10 @@ void CPY(AddrMode am) {
     else {
         CCPU->Status = ClearBit(CCPU->Status, SFPos_Zero);
     }
+
+    uint8_t result = CCPU->RegY - valueToCompare;
+
+    CheckSetSFNegative(result);
 
     // Something about negative flag, but I don't know what the "result" is
 }
@@ -2168,7 +2373,7 @@ void LSR(AddrMode am) {
             CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
         }
 
-        number = number >> 1;
+        number >>= 1;
         CCPU->Accumulator = number;
         UseCPUCycles(2U);
     }
@@ -2185,7 +2390,7 @@ void LSR(AddrMode am) {
                 CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
             }
 
-            number = number >> 1;
+            number >>= 1;
             StoreZeroPage(value, number);
             UseCPUCycles(5U);
         }
@@ -2199,7 +2404,7 @@ void LSR(AddrMode am) {
                 CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
             }
 
-            number = number >> 1;
+            number >>= 1;
             StoreZeroPageX(value, number);
             UseCPUCycles(6U);
         }
@@ -2214,7 +2419,7 @@ void LSR(AddrMode am) {
                 CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
             }
 
-            number = number >> 1;
+            number >>= 1;
             StoreAbsolute(addr, number);
             UseCPUCycles(6U);
         }
@@ -2229,7 +2434,7 @@ void LSR(AddrMode am) {
                 CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
             }
 
-            number = number >> 1;
+            number >>= 1;
             StoreAbsoluteX(addr, number);
             UseCPUCycles(7U);
         }
@@ -2260,7 +2465,15 @@ void PHA() { // 3 cycles
 }
 
 void PHP() { // 3 cycles
-    PushByte(CCPU->Status);
+    uint8_t statusCopy = CCPU->Status;
+    
+    // BUGME: Freezes AccuracyCoin's B Flag test
+    statusCopy = SetBit(statusCopy, SFPos_BreakCommand);
+    statusCopy = SetBit(statusCopy, SFPos_UNUSED);
+    PushByte(statusCopy);
+
+    //PushByte(CCPU->Status);
+    
     UseCPUCycles(3U);
 }
 
@@ -2287,14 +2500,13 @@ void ROL(AddrMode am) {
         number = CCPU->Accumulator;
         carryBitSeven = CheckBit(number, 7U);
 
-        number = number << 1;
+        number <<= 1;
 
         if (CheckBit(CCPU->Status, SFPos_Carry)) {
             number = SetBit(number, 0U);
         }
 
         CCPU->Accumulator = number;
-        CheckSetSFZero(CCPU->Accumulator);
         UseCPUCycles(2U);
     }
     else {
@@ -2305,7 +2517,7 @@ void ROL(AddrMode am) {
 
             carryBitSeven = CheckBit(number, 7U);
 
-            number = number << 1;
+            number <<= 1;
 
             if (CheckBit(CCPU->Status, SFPos_Carry)) {
                 number = SetBit(number, 0U);
@@ -2319,7 +2531,7 @@ void ROL(AddrMode am) {
 
             carryBitSeven = CheckBit(number, 7U);
 
-            number = number << 1;
+            number <<= 1;
 
             if (CheckBit(CCPU->Status, SFPos_Carry)) {
                 number = SetBit(number, 0U);
@@ -2334,7 +2546,7 @@ void ROL(AddrMode am) {
 
             carryBitSeven = CheckBit(number, 7U);
 
-            number = number << 1;
+            number <<= 1;
 
             if (CheckBit(CCPU->Status, SFPos_Carry)) {
                 number = SetBit(number, 0U);
@@ -2349,7 +2561,7 @@ void ROL(AddrMode am) {
 
             carryBitSeven = CheckBit(number, 7U);
 
-            number = number << 1;
+            number <<= 1;
 
             if (CheckBit(CCPU->Status, SFPos_Carry)) {
                 number = SetBit(number, 0U);
@@ -2363,11 +2575,13 @@ void ROL(AddrMode am) {
         }
     }
 
+    CheckSetSFZero(number);
+
     if (carryBitSeven) {
-        SetBit(CCPU->Status, SFPos_Carry);
+        CCPU->Status = SetBit(CCPU->Status, SFPos_Carry);
     }
     else {
-        ClearBit(CCPU->Status, SFPos_Carry);
+        CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
     }
 
     // Is resulting number negative (above 127)?
@@ -2387,14 +2601,13 @@ void ROR(AddrMode am) {
         number = CCPU->Accumulator;
         carryBitZero = CheckBit(number, 0U);
 
-        number = number >> 1;
+        number >>= 1;
 
         if (CheckBit(CCPU->Status, SFPos_Carry)) {
             number = SetBit(number, 7U);
         }
 
         CCPU->Accumulator = number;
-        CheckSetSFZero(CCPU->Accumulator);
         UseCPUCycles(2U);
     }
     else {
@@ -2405,7 +2618,7 @@ void ROR(AddrMode am) {
 
             carryBitZero = CheckBit(number, 0U);
 
-            number = number >> 1;
+            number >>= 1;
 
             if (CheckBit(CCPU->Status, SFPos_Carry)) {
                 number = SetBit(number, 7U);
@@ -2419,7 +2632,7 @@ void ROR(AddrMode am) {
 
             carryBitZero = CheckBit(number, 0U);
 
-            number = number >> 1;
+            number >>= 1;
 
             if (CheckBit(CCPU->Status, SFPos_Carry)) {
                 number = SetBit(number, 7U);
@@ -2434,7 +2647,7 @@ void ROR(AddrMode am) {
 
             carryBitZero = CheckBit(number, 0U);
 
-            number = number >> 1;
+            number >>= 1;
 
             if (CheckBit(CCPU->Status, SFPos_Carry)) {
                 number = SetBit(number, 7U);
@@ -2449,7 +2662,7 @@ void ROR(AddrMode am) {
 
             carryBitZero = CheckBit(number, 0U);
 
-            number = number >> 1;
+            number >>= 1;
 
             if (CheckBit(CCPU->Status, SFPos_Carry)) {
                 number = SetBit(number, 7U);
@@ -2463,11 +2676,13 @@ void ROR(AddrMode am) {
         }
     }
 
+    CheckSetSFZero(number);
+
     if (carryBitZero) {
-        SetBit(CCPU->Status, SFPos_Carry);
+        CCPU->Status = SetBit(CCPU->Status, SFPos_Carry);
     }
     else {
-        ClearBit(CCPU->Status, SFPos_Carry);
+        CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
     }
 
     // Is resulting number negative (above 127)?
@@ -2484,6 +2699,9 @@ void RTI() { // 6 cycles
     uint8_t status = PopByte();
     uint8_t low = PopByte();
     uint8_t high = PopByte();
+
+    status = ClearBit(status, SFPos_BreakCommand);
+    status = ClearBit(status, SFPos_UNUSED);
 
     CCPU->Status = status;
     uint16_t addr = AssembleAbsoluteAddress(low, high);
@@ -2573,15 +2791,15 @@ void SBC(AddrMode am) {
     temp -= (1 - CheckBit(CCPU->Status, SFPos_Carry));
 
     if (temp > UINT8_MAX) {
-        CCPU->Status = SetBit(CCPU->Status, SFPos_Carry);
+        CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
 
         temp = temp % (UINT8_MAX + 1);
     }
     else {
-        CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
+        CCPU->Status = SetBit(CCPU->Status, SFPos_Carry);
     }
 
-    if ((temp ^ CCPU->Accumulator) & (temp ^ secValue) & 0x80U) {
+    if ((temp ^ CCPU->Accumulator) & (temp ^ ~secValue) & 0x80U) {
         CCPU->Status = SetBit(CCPU->Status, SFPos_Overflow);
     }
     else {
@@ -2785,6 +3003,138 @@ void CLV() { // 2 cycles
     UseCPUCycles(2U);
 }
 
-void NOP() { // 2 cycles
-    UseCPUCycles(2U);
+void NOP(AddrMode am) { // 2 cycles
+    if (am == AM_Implied) {
+        UseCPUCycles(2U);
+        return;
+    }
+
+    uint8_t value = ReadProgramByte();
+    
+    switch (am) {
+        case AM_Immediate:
+            UseCPUCycles(2U);
+            break;
+
+        case AM_ZeroPage:
+            UseCPUCycles(3U);
+            break;
+
+        case AM_ZeroPageX:
+            UseCPUCycles(4U);
+            break;
+
+        case AM_Absolute: {
+            uint8_t secValue = ReadProgramByte();
+            UseCPUCycles(4U);
+            break;
+        }
+
+        case AM_AbsoluteX: {
+            uint8_t secValue = ReadProgramByte();
+            GetAbsoluteX(AssembleAbsoluteAddress(value, secValue));
+            UseCPUCycles(4U);
+            break;
+        }
+    }
+}
+
+
+void SLO(AddrMode am) {
+    uint8_t value = ReadProgramByte();
+    uint8_t number;
+    uint8_t cycles;
+
+    switch (am) {
+        case AM_ZeroPage: // 5 cycles
+            number = GetZeroPage(value);
+            OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
+
+            number <<= 1;
+            StoreZeroPage(value, number);
+
+            cycles = 5U;
+            break;
+
+        case AM_ZeroPageX: // 6 cycles
+            number = GetZeroPageX(value);
+            OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
+
+            number <<= 1;
+            StoreZeroPageX(value, number);
+
+            cycles = 6U;
+            break;
+
+        case AM_Absolute: { // 6 cycles
+            uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
+            number = GetAbsolute(addr);
+            OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
+
+            number <<= 1;
+            StoreAbsolute(addr, number);
+
+            cycles = 6U;
+            break;
+        }
+        
+        case AM_AbsoluteX: { // 7 cycles
+            uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
+            number = GetAbsoluteX(addr);
+            OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
+
+            number <<= 1;
+            StoreAbsoluteX(addr, number);
+
+            cycles = 7U;
+            break;
+        }
+        
+        case AM_AbsoluteY: { // 7 cycles
+            uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
+            number = GetAbsoluteY(addr);
+            OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
+
+            number <<= 1;
+            StoreAbsoluteY(addr, number);
+
+            cycles = 7U;
+            break;
+        }
+
+        case AM_IndirectX: { // 8 cycles
+            uint16_t addr = GetIndirectZPAddrX(value);
+            number = GetAbsolute(addr);
+            OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
+
+            number <<= 1;
+            StoreAbsolute(addr, number);
+            
+            cycles = 8U;
+            break;
+        }
+
+        case AM_IndirectY: { // 8 cycles
+            uint16_t addr = GetIndirectZPAddrY(value);
+            number = GetAbsolute(addr);
+            OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
+
+            number <<= 1;
+            StoreAbsolute(addr, number);
+
+            cycles = 8U;
+            break;
+        }
+        
+        default:
+            printf("Unhandled addressing\n");
+            break;
+    }
+
+    CCPU->Accumulator = CCPU->Accumulator | number;
+
+    CheckSetSFZero(CCPU->Accumulator);
+    CheckSetSFNegative(CCPU->Accumulator);
+
+    UseCPUCycles(cycles);
 }
