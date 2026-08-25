@@ -91,6 +91,9 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
                 break;
 
             case SDLK_SPACE:
+                if (StopExecution) {
+                    HasAnnouncedStop = 0;
+                }
                 StopExecution = !StopExecution;
                 break;
 
@@ -213,6 +216,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     DumpMemory();
     DumpPPU();
+    DumpStateLog((size_t)result);
     /* SDL will clean up the window/renderer for us. */
 }
 

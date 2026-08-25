@@ -172,6 +172,21 @@ uint16_t GetBaseBGPatternTableAddress() {
     return addr;
 }
 
+uint16_t GetAttribute(uint16_t addr) {
+    const uint16_t base = (addr & 0xFC00) + 0x03C0;
+    const uint16_t diff = addr - (addr & 0xFC00);
+    const uint16_t cell = (diff / 128) * 8 + ((diff % 128) % 32 / 4);
+
+    return PPURead(base + cell);
+}
+
+uint8_t GetAttributeTilePart(uint16_t addr) {
+    const uint16_t diff = addr - (addr & 0xFC00);
+    const uint8_t part = (diff / 2) % 2 + ((diff / 64) % 2) * 2;
+
+    return part * 2;
+}
+
 
 void OnReadPPUSTATUS() {
     CurPPU->RegW = 0U;

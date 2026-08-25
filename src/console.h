@@ -28,6 +28,14 @@ typedef struct SpriteData {
     uint8_t PositionX;
 } SpriteData;
 
+typedef struct EmuState {
+    uint16_t Addr;
+    uint8_t OpCode;
+    uint8_t Acc;
+    uint8_t RegX;
+    uint8_t RegY;
+} EmuState;
+
 // Horizontal resolution is 256, with 85 extra for the horizontal blanking period, making up 256 + 85 = 341 scanline length
 #define Scanline_Length         341 // in PPU pixels/cycles
 #define HBlank_Length            85 // in PPU pixels/cycles
@@ -76,6 +84,9 @@ extern ControllerInput Input0;
 extern uint8_t Input0Conv;
 extern uint8_t Input0Buffer;
 
+extern EmuState States[16];
+extern size_t StateIndex;
+
 void SetupConsole();
 void ResetFrameCount();
 void UseCPUCycles(uint8_t amount);
@@ -91,5 +102,8 @@ void DrawBGLayer();
 void GetValidSPR(SpriteData* sprites);
 void DrawSPRLayer();
 void DrawSPR(SpriteData* spr);
+
+void WriteStateLog(uint8_t inst);
+void DumpStateLog(size_t result);
 
 #endif

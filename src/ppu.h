@@ -63,6 +63,10 @@
 // Mirrored until 0x3FFF
 #define PaletteRAMIndeces_Start     0x3F00U
 
+#define SPRAttrPos_Priority				 5U
+#define SPRAttrPos_FlipH				 6U
+#define SPRAttrPos_FlipV				 7U
+
 
 typedef struct PPU {
     uint16_t RegV;  // Current VRAM address. 15 bits - use setter for this register
@@ -199,6 +203,8 @@ void PPUInit();
 uint16_t GetBaseSPRPatternTableAddress();
 uint16_t GetBaseBGPatternTableAddress();
 uint16_t GetBaseNameTableAddress();
+uint16_t GetAttribute(uint16_t addr);
+uint8_t GetAttributeTilePart(uint16_t addr);
 
 void OnReadPPUSTATUS();
 void OnReadPPUDATA();
@@ -213,6 +219,5 @@ void OnWriteToOAMDATA();
 void DumpPPU();
 void DumpPPUWriteLine(FILE* file, uint16_t startAddr);
 void DumpOAM(FILE* file);
-//void OAMDMA();
 
 #endif

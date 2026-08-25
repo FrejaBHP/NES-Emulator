@@ -30,6 +30,9 @@ ControllerInput Input0 = { 0 };
 uint8_t Input0Conv = 0;
 uint8_t Input0Buffer = 0;
 
+EmuState States[16] = { 0 };
+size_t StateIndex = 0;
+
 void SetupConsole() {
     if (CurROM->TimingMode == TMode_RP2C02) {
         System = SYS_NTSC;
@@ -107,6 +110,7 @@ void RunCPU(uint32_t timestamp) {
         RunPPU(CPUTimeStamp);
 
         uint8_t instruction = ReadProgramByte();
+        WriteStateLog(instruction);
         //printf("Addr: %04X, Instruction: %02X.    Next two bytes: %02X, %02X.    A: %02X, X: %02X, Y: %02X, Status: %02X\n", CCPU->PC - 1, instruction, CPUMemory[CCPU->PC], CPUMemory[CCPU->PC + 1], CCPU->Accumulator, CCPU->RegX, CCPU->RegY, CCPU->Status);
 
         /*
@@ -275,19 +279,35 @@ void RunPPU(uint32_t timestamp) {
 void DrawBGLayer() {
     // Cheating a bit
     const uint16_t ntBaseAddr = GetBaseNameTableAddress();
+    const uint16_t coarseX = (uint16_t)0b0000000000011111 & CurPPU->RegT;
 
     for (size_t row = 0; row < 240; row++) {
         for (size_t col = 0; col < 256; col++) {
-            const uint16_t tileNum = ((row / 8) * 32) + (col / 8);
+            //const uint16_t tileNum = ((row / 8) * 32) + (col / 8);
+            const uint16_t tileNum = ((row / 8) * 32) + ((col + CurPPU->RegX % 8) / 8);
             
-            const uint16_t tileID = PPURead(ntBaseAddr + tileNum);
+            const uint16_t natAddr = ntBaseAddr + tileNum;
+            //const uint16_t natAddr = (ntBaseAddr + tileNum) + (0x40U * ((ntBaseAddr + tileNum) % 0x2000U) / 0x03C0);
+            uint16_t scrAddr = natAddr + CurPPU->RegX / 8 + coarseX;
+            
+            // If nametable is crossed OR hitting a transfer tile past the middle of the screen
+            if (((natAddr & 0xFFE0) != (scrAddr & 0xFFE0)) || ((col > 128) && ((tileNum % 32) == 0))) {
+                scrAddr ^= 0x0400U;
+                scrAddr -= 0x20U;
+            }
+
+            const uint16_t tileID = PPURead(scrAddr);
             const uint16_t bgTileAddr = GetBaseBGPatternTableAddress() + (tileID * 0x10) + (row % 8);
-            const uint16_t tileAttr = PPURead(((ntBaseAddr + tileNum) & 0xFC00) + 0x03C0 + ((row / 32) * 8) + (col / 32));
-            const uint16_t attrShift = (((tileNum % 32) / 2 % 2) + (tileNum / 64 % 2) * 2) * 2;
+            //const uint16_t tileAttr = PPURead(((natTileAddr) & 0xFC00) + 0x03C0 + ((row / 32) * 8) + (col / 32));
+            const uint16_t tileAttr = GetAttribute(scrAddr);
+            //const uint16_t attrShift = (((tileNum % 32) / 2 % 2) + (tileNum / 64 % 2) * 2) * 2;
+            const uint16_t attrShift = GetAttributeTilePart(scrAddr);
             const uint16_t paletteOffset = ((tileAttr >> attrShift) & 0x3) * 4;
-            const uint8_t pixel = ((PPURead(bgTileAddr) >> (7 - (col % 8))) & 1) + (((PPURead(bgTileAddr + 8) >> (7 - (col % 8))) & 1) * 2);
+            //const uint8_t pixel = ((PPURead(bgTileAddr) >> (7 - (col % 8))) & 1) + (((PPURead(bgTileAddr + 8) >> (7 - (col % 8))) & 1) * 2);
+            const uint8_t pixel = ((PPURead(bgTileAddr) >> (7 - ((col + CurPPU->RegX % 8) % 8))) & 1) + (((PPURead(bgTileAddr + 8) >> (7 - ((col + CurPPU->RegX % 8) % 8))) & 1) * 2);
 
             uint16_t paletteIndex = PaletteRAMIndeces_Start + paletteOffset + pixel;
+
             // Might need some tweaking once sprites exist
             if (paletteIndex % 4 == 0) {
                 paletteIndex = 0x3F00U;
@@ -347,6 +367,13 @@ void DrawSPRLayer() {
 }
 
 void DrawSPR(SpriteData* spr) {
+    // FIXME: Temporary routine to skip drawing low priority sprites - find solution later
+    /*
+    if (CheckBit(spr->Attributes, SPRAttrPos_Priority)) {
+        return;
+    }
+    */
+
     uint16_t ntBaseAddr;
     const bool isBigSprite = CheckBit(*CurPPU->PPUCTRL, PPUCTRL_SpriteSize);
 
@@ -364,8 +391,8 @@ void DrawSPR(SpriteData* spr) {
     const uint8_t paletteID = 0b00000011 & spr->Attributes;
     const uint16_t paletteAddr = PaletteRAMIndeces_Start + ((paletteID + 4) * 4);
 
-    bool flipH = CheckBit(spr->Attributes, 6U);
-    bool flipV = CheckBit(spr->Attributes, 7U);
+    bool flipH = CheckBit(spr->Attributes, SPRAttrPos_FlipH);
+    bool flipV = CheckBit(spr->Attributes, SPRAttrPos_FlipV);
 
     for (size_t row = 0; row < 8; row++) {
         for (size_t col = 0; col < 8; col++) {
@@ -398,4 +425,42 @@ void DrawSPR(SpriteData* spr) {
             }
         }
     }
+}
+
+void WriteStateLog(uint8_t inst) {
+    States[StateIndex].OpCode = inst;
+    States[StateIndex].Acc = CCPU->Accumulator;
+    States[StateIndex].RegX = CCPU->RegX;
+    States[StateIndex].RegY = CCPU->RegY;
+    States[StateIndex].Addr = CCPU->PC - 1;
+
+    StateIndex++;
+
+    if (StateIndex == 16) {
+        StateIndex = 0;
+    }
+}
+
+void DumpStateLog(size_t result) {
+    FILE* log = fopen("log.txt", "w");
+    fprintf(log, "");
+    fclose(log);
+    
+    log = fopen("log.txt", "a");
+
+    size_t i = StateIndex + 1;
+    size_t n = 0;
+
+    fprintf(log, "Result code: %u\nCall stack, oldest to newest\n\n", result);
+
+    while (n < 16) {
+        if (i == 16) {
+            i = 0;
+        }
+
+        fprintf(log, "Addr: %04X    Opcode: %02X    A: %02X  X: %02X  Y: %02X\n", States[i].Addr, States[i].OpCode, States[i].Acc, States[i].RegX, States[i].RegY);
+        n++;
+    }
+    
+    fclose(log);
 }
