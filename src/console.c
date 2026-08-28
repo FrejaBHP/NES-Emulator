@@ -3,6 +3,7 @@
 #include <console.h>
 #include <cpu.h>
 #include <ppu.h>
+#include <apu.h>
 #include <rom.h>
 
 SystemType System = SYS_NTSC;
@@ -10,7 +11,7 @@ SystemType System = SYS_NTSC;
 uint32_t CPUTimeStamp = 0;   // How many master cycles the CPU has used this frame
 uint32_t PPUTimeStamp = 0;   // How many master cycles the PPU has used this frame
 uint32_t CPUCycleCount = 0;  // How many CPU cycles has been used this frame
-uint32_t CPUCycleCountLast = 0;
+//uint32_t CPUCycleCountLast = 0;
 uint32_t PPUCycleCount = 0;  // How many PPU cycles has been used this frame
 uint8_t CPUCyclesCarry = 0;
 
@@ -53,15 +54,22 @@ void SetupConsole() {
 }
 
 void ResetFrameCount() {
-    // This shouldn't fully reset, but not sure of exact numbers to deduct yet
+    // FIXME: This shouldn't fully reset, but not sure of exact numbers to deduct yet
+    // Addendum: Even fixing the scanline count, this still leads to a grey screen
+
+    //const uint32_t tempc1 = (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
+    //const uint32_t tempc2 = NumCPUCycles_NTSC;
+    //printf("CPU T: %u, -%u\nCPU C: %u, -%u\n", CPUTimeStamp, temp1, CPUCycleCount, temp2);
+
     //CPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
     //CPUCycleCount -= NumCPUCycles_NTSC;
+
     CPUTimeStamp = 0;
     CPUCycleCount = 0;
-    CPUCycleCountLast = 0;
 
     //PPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
     //PPUCycleCount -= (NumCPUCycles_NTSC * (CPUCycleDivider_NTSC / PPUCycleDivider));
+
     PPUTimeStamp = 0;
     PPUCycleCount = 0;
 }
@@ -168,7 +176,7 @@ void RunPPU(uint32_t timestamp) {
             CurDot -= Scanline_Length;
             CurScanline++;
 
-            if (CurScanline == 262) {
+            if (CurScanline == 261) {
                 CurScanline = -1;
             }
         }
@@ -395,6 +403,10 @@ void DrawSPR(SpriteData* spr) {
     bool flipV = CheckBit(spr->Attributes, SPRAttrPos_FlipV);
 
     for (size_t row = 0; row < 8; row++) {
+        if ((actualPosY + row) > 0xEFU) {
+            break;
+        }
+
         for (size_t col = 0; col < 8; col++) {
             const uint16_t sprOffset = sprTileAddr + row;
 
@@ -403,19 +415,46 @@ void DrawSPR(SpriteData* spr) {
             const uint32_t paletteValue = Palette_NTSC[PPURead(paletteAddr + pixel)];
 
             uint32_t bufferIndex;
+            uint16_t spriteXOverflow; // To catch attempts at drawing at X > 255, value is stored in a 16-bit integer first
+            uint8_t spriteX; // Dot to draw the pixel on
+            uint8_t spriteY; // Scanline to draw the pixel on
 
-            if (!flipH && !flipV) {
-                bufferIndex = ((actualPosY + row) * 256 * 4) + ((spr->PositionX + col) * 4);
-            }
-            else if (flipH && !flipV) {
-                bufferIndex = ((actualPosY + row) * 256 * 4) + (((spr->PositionX + 7) - col) * 4);
-            }
-            else if (!flipH && flipV) {
-                bufferIndex = (((actualPosY + 7) - row) * 256 * 4) + ((spr->PositionX + col) * 4);
+            if (!flipH) {
+                spriteXOverflow = spr->PositionX + col;
             }
             else {
-                bufferIndex = (((actualPosY + 7) - row) * 256 * 4) + (((spr->PositionX + 7) - col) * 4);
+                // If flipped, draw the sprite right to left
+                spriteXOverflow = (spr->PositionX + 7) - col;
             }
+
+            if (!flipV) {
+                spriteY = actualPosY + row;
+            }
+            else {
+                // If flipped, draw the sprite upside down
+                spriteY = (actualPosY + 7) - row;
+            }
+
+            // If pixel would be drawn below the screen, stop drawing
+            if (spriteY > 0xEFU) {
+                break;
+            }
+
+            // If pixel would be drawn out of bounds to the right (onto the next scanline from the left), don't, and try the next pixel
+            // If flipped horizontally, valid pixels might occur in a later loop (drawing right to left), so continue instead of break
+            if (spriteXOverflow > 0xFFU) {
+                continue;
+            }
+
+            spriteX = (uint8_t)spriteXOverflow;
+
+            bufferIndex = (spriteY * 256 * 4) + (spriteX * 4);
+
+            /*
+            if (bufferIndex > (256*240*4)) {
+                printf("Scanline: %u, Index: %u, FlipH: %u, FlipV: %u\n", actualPosY + row, bufferIndex, flipH, flipV);
+            }
+            */
 
             if (pixel) {
                 SPRFrameBuffer[bufferIndex] = (paletteValue >> 16) & 0xFF;
@@ -460,6 +499,7 @@ void DumpStateLog(size_t result) {
 
         fprintf(log, "Addr: %04X    Opcode: %02X    A: %02X  X: %02X  Y: %02X\n", States[i].Addr, States[i].OpCode, States[i].Acc, States[i].RegX, States[i].RegY);
         n++;
+        i++;
     }
     
     fclose(log);

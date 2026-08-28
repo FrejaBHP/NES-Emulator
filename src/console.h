@@ -64,7 +64,7 @@ extern SystemType System;
 extern uint32_t CPUTimeStamp;   // How many master cycles the CPU has used this frame
 extern uint32_t PPUTimeStamp;   // How many master cycles the PPU has used this frame
 extern uint32_t CPUCycleCount;  // How many CPU cycles has been used this frame
-extern uint32_t CPUCycleCountLast;
+//extern uint32_t CPUCycleCountLast;
 extern uint32_t PPUCycleCount;  // How many PPU cycles has been used this frame
 extern uint8_t CPUCyclesCarry;
 

@@ -1,5 +1,6 @@
 #include <emulator.h>
 #include <console.h>
+#include <apu.h>
 #include <rom.h>
 #include <string.h>
 #include <stdlib.h>
@@ -17,7 +18,7 @@ FILE* file = NULL;
 uint8_t ROMLoaded = 0;
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         SDL_Log("Couldn't initialise SDL: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
@@ -30,14 +31,20 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     SDL_SetRenderLogicalPresentation(Renderer, Window_Width, Window_Height, SDL_LOGICAL_PRESENTATION_LETTERBOX);
     SDL_SetDefaultTextureScaleMode(Renderer, SDL_SCALEMODE_PIXELART);
 
-    BGTexture = SDL_CreateTexture(Renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_TARGET, 256, 240);
-    SPRTexture = SDL_CreateTexture(Renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, 256, 240);
+    BGTexture = SDL_CreateTexture(Renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, 256, 240);
+    SPRTexture = SDL_CreateTexture(Renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, 256, 240);
 
     if (!BGTexture) {
         SDL_Log("Texture could not be created: %s", SDL_GetError());
     }
     if (!SPRTexture) {
         SDL_Log("Texture could not be created: %s", SDL_GetError());
+    }
+
+    AudioDevice = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, NULL);
+    if (!AudioDevice) {
+        SDL_Log("Couldn't open audio device: %s", SDL_GetError());
+        return SDL_APP_FAILURE;
     }
 
     // Calculates the amount of time a frame should ideally take in nanoseconds to sustain the set framerate
@@ -152,11 +159,6 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 SDL_AppResult SDL_AppIterate(void* appstate) {
     if (ROMLoaded) {
         if (!StopExecution) {
-            //SDL_SetRenderTarget(Renderer, SPRTexture);
-            //SDL_SetRenderDrawColor(Renderer, 0, 0, 0, 0);
-            //RenderClear(Renderer);
-            //SDL_SetRenderTarget(Renderer, NULL);
-
             HandleNESInput();
 
             if (System == SYS_NTSC) {
@@ -165,8 +167,6 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
             else {
                 RunCPU(NumCPUCycles_PAL * CPUCycleDivider_PAL);
             }
-            //RunPPU(CPUTimeStamp);
-            //StepPPU();
 
             FrameCount++;
         }
@@ -217,6 +217,11 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     DumpMemory();
     DumpPPU();
     DumpStateLog((size_t)result);
+
+    SDL_CloseAudioDevice(AudioDevice);
+    SDL_DestroyAudioStream(ST_SQ1);
+    SDL_DestroyAudioStream(ST_SQ2);
+    
     /* SDL will clean up the window/renderer for us. */
 }
 
@@ -242,6 +247,7 @@ void EmulatorStart() {
 
 void Initialisation() {
     CPUInit();
+    APUInit();
     PPUInit();
 }
 

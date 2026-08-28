@@ -18,6 +18,7 @@ extern SDL_Window* Window;
 extern SDL_Renderer* Renderer;
 extern SDL_Texture* BGTexture;
 extern SDL_Texture* SPRTexture;
+
 extern uint64_t NextFrameTime;
 
 extern FILE* file;

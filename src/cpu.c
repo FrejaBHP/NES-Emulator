@@ -1,6 +1,7 @@
 #include <cpu.h>
 #include <console.h>
 #include <ppu.h>
+#include <apu.h>
 #include <rom.h>
 #include <stdlib.h>
 

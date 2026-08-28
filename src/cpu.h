@@ -24,7 +24,7 @@
 #define PPU_PPUADDR                 0x2006U
 #define PPU_PPUDATA                 0x2007U
 
-// APU registers
+// APU registers in CPU addressing space
 
 #define SQ1_VOL                     0x4000U     // Duty cycle and volume
 #define SQ1_SWEEP                   0x4001U     // Sweep control register
