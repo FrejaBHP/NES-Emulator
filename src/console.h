@@ -68,6 +68,8 @@ extern uint32_t CPUCycleCount;  // How many CPU cycles has been used this frame
 extern uint32_t PPUCycleCount;  // How many PPU cycles has been used this frame
 extern uint8_t CPUCyclesCarry;
 
+extern uint8_t AlternateFrame;
+extern uint16_t SampleCounter;
 extern uint32_t FrameCount;
 
 extern int16_t CurScanline;
@@ -75,7 +77,12 @@ extern uint16_t CurDot;
 extern uint8_t* BGFrameBuffer;
 extern uint8_t* SPRFrameBuffer;
 
+extern int16_t* SQ0SoundBuffer;
+extern int16_t* SQ1SoundBuffer;
+
 extern uint8_t DMAOccured;
+extern bool QueueNMI;
+extern bool NMIOccured;
 
 extern uint8_t StopExecution;
 extern uint8_t HasAnnouncedStop;
@@ -99,6 +106,7 @@ void RunCPU(uint32_t timestamp);
 void RunPPU(uint32_t timestamp);
 
 void DrawBGLayer();
+void DrawBGPixel(uint8_t x, uint8_t y);
 void GetValidSPR(SpriteData* sprites);
 void DrawSPRLayer();
 void DrawSPR(SpriteData* spr);

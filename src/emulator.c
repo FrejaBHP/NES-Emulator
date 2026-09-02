@@ -160,6 +160,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
     if (ROMLoaded) {
         if (!StopExecution) {
             HandleNESInput();
+            NMIOccured = false;
 
             if (System == SYS_NTSC) {
                 RunCPU(NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
@@ -169,6 +170,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
             }
 
             FrameCount++;
+            ResetFrameCount();
         }
         else {
             if (!HasAnnouncedStop) {
@@ -198,6 +200,16 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
         SDL_Log("Can't render present: %s", SDL_GetError());
     }
 
+    if (!AlternateFrame) {
+        SDL_PutAudioStreamData(ST_SQ[0].Stream, SQ0SoundBuffer, 1600);
+    }
+    else {
+        SDL_PutAudioStreamData(ST_SQ[0].Stream, SQ1SoundBuffer, 1600);
+    }
+
+    AlternateFrame = !AlternateFrame;
+    SampleCounter = 0;
+
     const uint64_t now = SDL_GetTicksNS();
 	const uint64_t executionTime = now - NextFrameTime;
 
@@ -206,8 +218,6 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 	}
 
 	NextFrameTime += DesiredFrameTime;
-
-    ResetFrameCount();
 
     return SDL_APP_CONTINUE;  /* carry on with the program! */
 }
@@ -219,8 +229,8 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     DumpStateLog((size_t)result);
 
     SDL_CloseAudioDevice(AudioDevice);
-    SDL_DestroyAudioStream(ST_SQ1);
-    SDL_DestroyAudioStream(ST_SQ2);
+    SDL_DestroyAudioStream(ST_SQ[0].Stream);
+    SDL_DestroyAudioStream(ST_SQ[1].Stream);
     
     /* SDL will clean up the window/renderer for us. */
 }

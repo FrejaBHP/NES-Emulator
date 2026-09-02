@@ -215,7 +215,7 @@ void OnReadPPUDATA() {
 
 
 void OnWriteToPPUCTRL() {
-    //printf("PPUCTRL: Wrote %02X. PC: %04X. Frame: %u, CPU cycle: %u\n", *CurPPU->PPUCTRL, CCPU->PC - 3, FrameCount, CPUCycleCount);
+    //printf("PPUCTRL: Wrote %02X. PC: %04X. Scanline: %u\n", *CurPPU->PPUCTRL, CCPU->PC - 3, CurScanline);
 
     OverrideBit16(&CurPPU->RegT, 10, CheckBit(*CurPPU->PPUCTRL, 0));
     OverrideBit16(&CurPPU->RegT, 11, CheckBit(*CurPPU->PPUCTRL, 1));
@@ -285,12 +285,26 @@ void OnWriteToPPUADDR() {
 
 void OnWriteToPPUDATA() {
     PPUWrite(CurPPU->RegV, CurPPU->DataBus);
-    //printf("PPUDATA: Wrote %02X to %04X. PC: %04X. Frame: %u, CPU cycle: %u\n", *CurPPU->PPUDATA, CurPPU->RegV, CCPU->PC - 3, FrameCount, CPUCycleCount);
 
     /*
-    if ((CCPU->PC - 3) == 0xF216) {
-        printf("PPUDATA: Wrote %02X to %04X. PC: %04X. Frame: %u, CPU cycle: %u\n", *CurPPU->PPUDATA, CurPPU->RegV, CCPU->PC - 3, FrameCount, CPUCycleCount);
-        //printf("A: %02X, X: %02X, Y: %02X, Status: %02X\n", CCPU->Accumulator, CCPU->RegX, CCPU->RegY, CCPU->Status);
+    if (CurScanline > 0 && CurScanline < 240) {
+        if (CheckBit(*CurPPU->PPUMASK, PPUMASK_EnableBGRendering)) {
+            if ((CurPPU->RegV & 0x1F) == 31) {
+                CurPPU->RegV &= ~0x1F;
+                CurPPU->RegV ^= 0x0400;
+            }
+            else {
+                CurPPU->RegV += 1;
+            }
+        }
+    }
+    else {
+        if (!CheckBit(*CurPPU->PPUCTRL, PPUCTRL_VRAMIncrement)) {
+            PPUSetV(CurPPU->RegV + 1U);
+        }
+        else {
+            PPUSetV(CurPPU->RegV + 32U);
+        }
     }
     */
 

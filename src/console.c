@@ -15,6 +15,8 @@ uint32_t CPUCycleCount = 0;  // How many CPU cycles has been used this frame
 uint32_t PPUCycleCount = 0;  // How many PPU cycles has been used this frame
 uint8_t CPUCyclesCarry = 0;
 
+uint8_t AlternateFrame = 0;
+uint16_t SampleCounter = 0;
 uint32_t FrameCount = 0;
 
 int16_t CurScanline = -1; // There's a pre-render scanline, noted here with -1
@@ -22,7 +24,12 @@ uint16_t CurDot = 0;
 uint8_t* BGFrameBuffer = NULL;
 uint8_t* SPRFrameBuffer = NULL;
 
+int16_t* SQ0SoundBuffer = NULL;
+int16_t* SQ1SoundBuffer = NULL;
+
 uint8_t DMAOccured = 0;
+bool QueueNMI = false;
+bool NMIOccured = false;
 
 uint8_t StopExecution = 0;
 uint8_t HasAnnouncedStop = 0;
@@ -33,6 +40,8 @@ uint8_t Input0Buffer = 0;
 
 EmuState States[16] = { 0 };
 size_t StateIndex = 0;
+
+uint16_t temp = 0x2000;
 
 void SetupConsole() {
     if (CurROM->TimingMode == TMode_RP2C02) {
@@ -61,17 +70,17 @@ void ResetFrameCount() {
     //const uint32_t tempc2 = NumCPUCycles_NTSC;
     //printf("CPU T: %u, -%u\nCPU C: %u, -%u\n", CPUTimeStamp, temp1, CPUCycleCount, temp2);
 
-    //CPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
-    //CPUCycleCount -= NumCPUCycles_NTSC;
+    CPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
+    CPUCycleCount -= NumCPUCycles_NTSC;
 
-    CPUTimeStamp = 0;
-    CPUCycleCount = 0;
+    //CPUTimeStamp = 0;
+    //CPUCycleCount = 0;
 
-    //PPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
-    //PPUCycleCount -= (NumCPUCycles_NTSC * (CPUCycleDivider_NTSC / PPUCycleDivider));
+    PPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
+    PPUCycleCount -= (NumCPUCycles_NTSC * (CPUCycleDivider_NTSC / PPUCycleDivider));
 
-    PPUTimeStamp = 0;
-    PPUCycleCount = 0;
+    //PPUTimeStamp = 0;
+    //PPUCycleCount = 0;
 }
 
 void UseCPUCycles(uint8_t amount) {
@@ -83,6 +92,10 @@ void UseCPUCycles(uint8_t amount) {
     else {
         CPUTimeStamp = CPUCycleCount * CPUCycleDivider_PAL;
     }
+
+    ClockAPU();
+
+    //RunPPU(CPUTimeStamp);
 }
 
 void UsePPUCycles(uint8_t amount) {
@@ -115,8 +128,15 @@ void RunCPU(uint32_t timestamp) {
     */
 
     while (CPUTimeStamp < timestamp && !StopExecution) {
-        RunPPU(CPUTimeStamp);
+        if (!NMIOccured && QueueNMI) {
+            NMIOccured = true;
+            QueueNMI = false;
+            TriggerNMI();
+        }
 
+        
+
+        IsExecutingInstruction = 1;
         uint8_t instruction = ReadProgramByte();
         WriteStateLog(instruction);
         //printf("Addr: %04X, Instruction: %02X.    Next two bytes: %02X, %02X.    A: %02X, X: %02X, Y: %02X, Status: %02X\n", CCPU->PC - 1, instruction, CPUMemory[CCPU->PC], CPUMemory[CCPU->PC + 1], CCPU->Accumulator, CCPU->RegX, CCPU->RegY, CCPU->Status);
@@ -129,6 +149,8 @@ void RunCPU(uint32_t timestamp) {
         */
         
         ExecuteInstruction(instruction);
+        RunPPU(CPUTimeStamp);
+        IsExecutingInstruction = 0;
     }
 }
 
@@ -144,29 +166,47 @@ void RunPPU(uint32_t timestamp) {
             OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_Sprite0Hit, 0);
         }
 
-        /*
         // Drawing loop
         if (CurScanline >= 0 && CurScanline <= 239) {
+            if (CurScanline == 30 && CurDot == 91) {
+                if (CheckBit(*CurPPU->PPUMASK, PPUMASK_EnableBGRendering) && CheckBit(*CurPPU->PPUMASK, PPUMASK_EnableSPRRendering)) {
+                    OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_Sprite0Hit, 1);
+                }
+            }
 
-        }
-        */
-
-        if (CurScanline == 30 && CurDot == 64) {
-            if (CheckBit(*CurPPU->PPUMASK, PPUMASK_EnableBGRendering) && CheckBit(*CurPPU->PPUMASK, PPUMASK_EnableSPRRendering)) {
-                OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_Sprite0Hit, 1);
+            if (CurDot != 0 && CurDot < 257) {
+                DrawBGPixel((uint8_t)(CurDot - 1), (uint8_t)CurScanline);
             }
         }
-
         // VBlank
         else if (CurScanline == 241 && CurDot == 1) {
             OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_VBlank, 1);
 
             if (CheckBit(*CurPPU->PPUCTRL, PPUCTRL_VBlankNMIEnable)) {
-                TriggerNMI();
+                //TriggerNMI();
+                QueueNMI = true;
             }
 
-            DrawBGLayer();
+            //DrawBGLayer();
             DrawSPRLayer();
+        }
+
+        if (CurDot == 256) {
+            
+        }
+        else if (CurDot == 257) {
+            if (CheckBit(*CurPPU->PPUMASK, PPUMASK_EnableBGRendering)) {
+                uint16_t temp = CurPPU->RegV;
+                OverrideBit16(&temp, 10, CheckBit(GetHighByte(CurPPU->RegT), 2));
+                temp >>= 5;
+                temp <<= 5;
+
+                uint16_t other = 0b00011111 & CurPPU->RegT;
+                temp += other;
+
+                CurPPU->RegV = temp;
+                //CurPPU->RegV = CurPPU->RegT;
+            }
         }
 
         CurDot++;
@@ -287,7 +327,7 @@ void RunPPU(uint32_t timestamp) {
 void DrawBGLayer() {
     // Cheating a bit
     const uint16_t ntBaseAddr = GetBaseNameTableAddress();
-    const uint16_t coarseX = (uint16_t)0b0000000000011111 & CurPPU->RegT;
+    const uint16_t coarseX = (uint16_t)0b0000000000011111 & CurPPU->RegV;
 
     for (size_t row = 0; row < 240; row++) {
         for (size_t col = 0; col < 256; col++) {
@@ -326,6 +366,62 @@ void DrawBGLayer() {
             BGFrameBuffer[(row * 256 * 3) + (col * 3) + 2] = (Palette_NTSC[PPURead(paletteIndex)]) & 0xFF;
         }
     }
+}
+
+void DrawBGPixel(uint8_t x, uint8_t y) {
+    /*
+    Research results from Monday:
+        - MESEN is annoying and doesn't show 2000.0/2000.1
+        - There's a high possibility that scrolling and indexing relies entirely on V during rendering
+        - Because I don't use V for anything except Coarse X, I run into problems
+        - PPUCTRL is set to something else sometimes at the end of frame, and isn't reset
+        - V, however, is set to 0, which would imply no scrolling and using the first table
+        - Putting those elements together, it is likely V is what I should be using instead of the registers (and incomprehensible code) for scrolling and indexing
+        - Meaning that V is progressively built up as rendering happens, and writing to the registers is to primarily copy specific values into V
+        - Only problem is that V seems to always be 0 somehow??
+    */
+
+    const uint16_t ntBaseAddr = GetBaseNameTableAddress();
+    const uint16_t coarseX = (uint16_t)0b0000000000011111 & CurPPU->RegV;
+
+    const uint16_t tileNum = ((y / 8) * 32) + ((x + CurPPU->RegX % 8) / 8);
+    
+    const uint16_t natAddr = ntBaseAddr + tileNum;
+    uint16_t scrAddr = natAddr + CurPPU->RegX / 8 + coarseX;
+    
+    // If nametable is crossed OR hitting a transfer tile past the middle of the screen
+    if (((natAddr & 0xFFE0) != (scrAddr & 0xFFE0)) || ((x > 128) && ((tileNum % 32) == 0))) {
+        scrAddr ^= 0x0400U;
+        scrAddr -= 0x20U;
+    }
+
+    if (ntBaseAddr != temp) {
+        //printf("NewBAd    BaseAddr: %04X, ScrAddr: %04X, V: %04X, X: %02u, Y: %02u, PC: %04X\n", ntBaseAddr, scrAddr, CurPPU->RegV, x, y, CCPU->PC);
+    }
+
+    if (x == 32 && y == 16) {
+        //printf("X32Y16    BaseAddr: %04X, ScrAddr: %04X, V: %04X\n", ntBaseAddr, scrAddr, CurPPU->RegV);
+    }
+
+    temp = ntBaseAddr;
+
+    const uint16_t tileID = PPURead(scrAddr);
+    const uint16_t bgTileAddr = GetBaseBGPatternTableAddress() + (tileID * 0x10) + (y % 8);
+    const uint16_t tileAttr = GetAttribute(scrAddr);
+    const uint16_t attrShift = GetAttributeTilePart(scrAddr);
+    const uint16_t paletteOffset = ((tileAttr >> attrShift) & 0x3) * 4;
+    const uint8_t pixel = ((PPURead(bgTileAddr) >> (7 - ((x + CurPPU->RegX % 8) % 8))) & 1) + (((PPURead(bgTileAddr + 8) >> (7 - ((x + CurPPU->RegX % 8) % 8))) & 1) * 2);
+
+    uint16_t paletteIndex = PaletteRAMIndeces_Start + paletteOffset + pixel;
+
+    // Might need some tweaking once sprites exist
+    if (paletteIndex % 4 == 0) {
+        paletteIndex = 0x3F00U;
+    }
+
+    BGFrameBuffer[(y * 256 * 3) + (x * 3)] = (Palette_NTSC[PPURead(paletteIndex)] >> 16) & 0xFF;
+    BGFrameBuffer[(y * 256 * 3) + (x * 3) + 1] = (Palette_NTSC[PPURead(paletteIndex)] >> 8) & 0xFF;
+    BGFrameBuffer[(y * 256 * 3) + (x * 3) + 2] = (Palette_NTSC[PPURead(paletteIndex)]) & 0xFF;
 }
 
 // Don't use

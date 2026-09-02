@@ -38,6 +38,8 @@ uint8_t* CPUMemory = NULL;
 uint8_t JOY0Latch = 0;
 uint8_t JOY1Latch = 0;
 
+uint8_t IsExecutingInstruction = 0;
+
 void CPUInit() {
     CCPU = calloc(1, sizeof(CPU));
     CPUMemory = calloc(1, 0xFFFF + 1);
@@ -126,6 +128,7 @@ uint8_t ReadProgramByte() {
     uint8_t value = CPUMemory[CCPU->PC];
     CCPU->DataBus = value;
     CCPU->PC++;
+    UseCPUCycles(1U);
     return value;
 }
 
@@ -165,6 +168,7 @@ void PushByte(uint8_t value) {
     //printf("Pushed %02hhX to %04hX\n", value, index);
 
     CCPU->SP--;
+    UseCPUCycles(1U);
 }
 
 uint8_t PopByte() {
@@ -173,6 +177,7 @@ uint8_t PopByte() {
     uint8_t value = CPUMemory[index];
     CCPU->DataBus = value;
 
+    UseCPUCycles(1U);
     //printf("Popped %02hhX from %04hX\n", value, index);
 
     return value;
@@ -205,34 +210,40 @@ void OverrideBit16(uint16_t* addr, uint8_t bit, uint8_t value) {
 
 uint8_t GetZeroPage(uint8_t index) {
     CCPU->DataBus = CPUMemory[index];
+    UseCPUCycles(1U);
     return CPUMemory[index];
 }
 
 uint8_t GetZeroPageX(uint8_t index) {
     index += CCPU->RegX;
-    return CPUMemory[index];
+    UseCPUCycles(1U);
+    return GetZeroPage(index);
 }
 
 uint8_t GetZeroPageY(uint8_t index) {
     index += CCPU->RegY;
-    return CPUMemory[index];
+    UseCPUCycles(1U);
+    return GetZeroPage(index);
 }
 
 void StoreZeroPage(uint8_t index, const uint8_t value) {
     //printf("Storing to Zero Page, i%02X v%02X\n", index, value);
     CCPU->DataBus = value;
     CPUMemory[index] = value;
+    UseCPUCycles(1U);
     //printf("Zero Page i%02X = %02X\n", index, Memory[index]);
 }
 
 void StoreZeroPageX(uint8_t index, const uint8_t value) {
     index += CCPU->RegX;
+    UseCPUCycles(1U);
     StoreZeroPage(index, value);
     //Memory[index] = value;
 }
 
 void StoreZeroPageY(uint8_t index, const uint8_t value) {
     index += CCPU->RegY;
+    UseCPUCycles(1U);
     StoreZeroPage(index, value);
     //Memory[index] = value;
 }
@@ -247,6 +258,8 @@ uint8_t GetAbsolute(uint16_t index) {
     else if ((uint16_t)APU_Start > index && index > (uint16_t)PPU_Start) {
         index = (index % (uint16_t)PPU_Size) + (uint16_t)PPU_Start;
     }
+
+    UseCPUCycles(1U);
 
     switch (index) {
         case PPU_PPUCTRL:
@@ -440,6 +453,54 @@ void StoreAbsolute(uint16_t index, const uint8_t value) {
             WriteToPPUADDR();
             break;
 
+        case SQ1_VOL:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToSQ(value, 0, 0);
+            break;
+
+        case SQ1_SWEEP:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToSQ(value, 1, 0);
+            break;
+
+        case SQ1_LO:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToSQ(value, 2, 0);
+            break;
+
+        case SQ1_HI:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToSQ(value, 3, 0);
+            break;
+
+        case SQ2_VOL:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToSQ(value, 0, 1);
+            break;
+
+        case SQ2_SWEEP:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToSQ(value, 1, 1);
+            break;
+
+        case SQ2_LO:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToSQ(value, 2, 1);
+            break;
+
+        case SQ2_HI:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToSQ(value, 3, 1);
+            break;
+
         case PPU_PPUDATA:
             //CPUMemory[index] = value;
             CurPPU->DataBus = value;
@@ -452,17 +513,7 @@ void StoreAbsolute(uint16_t index, const uint8_t value) {
             break;
 
         case SND_CHN:
-            // FIXME: Incomplete implementation, is supposed to alter APU counters
-            uint8_t write = value;
-            write <<= 3;
-            write >>= 3;
-
-            uint8_t sndchn = CPUMemory[SND_CHN];
-            sndchn <<= 1;
-            sndchn >>= 6;
-            sndchn <<= 1;
-
-            CPUMemory[SND_CHN] = sndchn | write;
+            WriteToStatus(value);
             break;
 
         case JOY0:
@@ -476,11 +527,19 @@ void StoreAbsolute(uint16_t index, const uint8_t value) {
             }
 
             break;
+
+        case JOY1:
+            //CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToFrameCounter(value);
+            break;
         
         default:
             CPUMemory[index] = value;
             break;
     }
+
+    UseCPUCycles(1U);
 
     //printf("Absolute Memory i%04X = %02X\n", index, Memory[index]);
 }
@@ -498,6 +557,7 @@ void StoreAbsoluteY(uint16_t index, const uint8_t value) {
 
 uint16_t GetIndirectAddr(uint16_t lookupAddr) {
     const uint8_t first = CPUMemory[lookupAddr];
+    UseCPUCycles(1U);
 
     uint8_t lowByte = GetLowByte(lookupAddr);
     if (lowByte == 0xFFU) {
@@ -507,25 +567,32 @@ uint16_t GetIndirectAddr(uint16_t lookupAddr) {
         uint16_t wrappedAddr = (highByte << 8) | lowByte;
 
         const uint8_t second = CPUMemory[wrappedAddr];
+        UseCPUCycles(1U);
         return AssembleAbsoluteAddress(first, second);
     }
     else {
         const uint8_t second = CPUMemory[++lookupAddr];
+        UseCPUCycles(1U);
         return AssembleAbsoluteAddress(first, second);
     }
 }
 
 uint16_t GetIndirectZPAddrX(uint8_t zpAddr) {
     uint8_t index = zpAddr + CCPU->RegX;
+    UseCPUCycles(1U);
     const uint8_t first = CPUMemory[index];
+    UseCPUCycles(1U);
     const uint8_t second = CPUMemory[++index];
+    UseCPUCycles(1U);
     
     return AssembleAbsoluteAddress(first, second);
 }
 
 uint16_t GetIndirectZPAddrY(uint8_t zpAddr) {
     const uint8_t first = CPUMemory[zpAddr];
+    UseCPUCycles(1U);
     const uint8_t second = CPUMemory[++zpAddr];
+    UseCPUCycles(1U);
 
     const uint16_t newAddr = AssembleAbsoluteAddress(first, second) + CCPU->RegY;
 
@@ -582,11 +649,13 @@ void TriggerNMI() {
 
     CCPU->Status = SetBit(CCPU->Status, SFPos_InterruptDisable);
 
-    UseCPUCycles(7U);
-
     CCPU->PC = 0xFFFAU;
-    JMP(AM_Absolute);
-    // At F1EB it returns to 0010, should be C7C4
+    UseCPUCycles(1U);
+
+    uint16_t addr = AssembleAbsoluteAddress(GetAbsolute(0xFFFA), GetAbsolute(0xFFFB));
+
+    CCPU->PC = addr;
+    UseCPUCycles(1U);
 }
 
 
@@ -616,12 +685,17 @@ void WriteToPPUDATA() {
 }
 
 void WriteToOAMDATA() {
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
+    UseCPUCycles(1U);
     
     OnWriteToOAMDATA();
 }
 
 void WriteToOAMDMA() {
+    if (CPUCycleCount % 2) {
+        UseCPUCycles(1U);
+    }
+
     const uint8_t highbyte = CPUMemory[OAMDMA];
     const uint16_t startIndex = (highbyte << 8) | (uint8_t)0U;
 
@@ -629,7 +703,7 @@ void WriteToOAMDMA() {
         const uint16_t index = startIndex + i;
         CPUMemory[PPU_OAMDATA] = GetAbsolute(index);
 
-        UseCPUCycles(2U);
+        UseCPUCycles(1U);
 
         OnWriteToOAMDATA();
     }
@@ -1412,51 +1486,51 @@ void BitwiseAccInstruction(AddrMode am, BitwiseOp op) {
     switch (am) {
         case AM_Immediate: // 2 cycles
             number = value;
-            UseCPUCycles(2U);
+            //UseCPUCycles(1U);
             break;
 
         case AM_ZeroPage: // 3 cycles
             number = GetZeroPage(value);
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageX: // 4 cycles
             number = GetZeroPageX(value);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
 
         case AM_Absolute: { // 4 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             number = GetAbsolute(index);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteX: { // 4 cycles (5 if crossing pages)
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             number = GetAbsoluteX(index);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteY: { // 4 cycles (5 if crossing pages)
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             number = GetAbsoluteY(index);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_IndirectX: { // 6 cycles
             uint16_t index = GetIndirectZPAddrX(value);
             number = GetAbsolute(index);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
         }
 
         case AM_IndirectY: { // 5 cycles (6 if page crossing)
             uint16_t index = GetIndirectZPAddrY(value);
             number = GetAbsolute(index);
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
             break;
         }
         
@@ -1496,8 +1570,6 @@ void BranchInstruction(uint8_t regpos, uint8_t sign) {
         }
     }
     
-    UseCPUCycles(2U);
-    
     if (succeed) {
         UseCPUCycles(1U);
         uint16_t prev = CCPU->PC;
@@ -1523,26 +1595,26 @@ void ADC(AddrMode am) {
         case AM_Immediate: // 2 cycles
             secValue = value;
             temp = CCPU->Accumulator + secValue;
-            UseCPUCycles(2U);
+            //UseCPUCycles(2U);
             break;
 
         case AM_ZeroPage: // 3 cycles
             secValue = GetZeroPage(value);
             temp = CCPU->Accumulator + secValue;
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageX: // 4 cycles
             secValue = GetZeroPageX(value);
             temp = CCPU->Accumulator + secValue;
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
 
         case AM_Absolute: { // 4 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             secValue = GetAbsolute(index);
             temp = CCPU->Accumulator + secValue;
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
@@ -1550,7 +1622,7 @@ void ADC(AddrMode am) {
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             secValue = GetAbsoluteX(index);
             temp = CCPU->Accumulator + secValue;
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
@@ -1558,7 +1630,7 @@ void ADC(AddrMode am) {
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             secValue = GetAbsoluteY(index);
             temp = CCPU->Accumulator + secValue;
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
@@ -1566,7 +1638,7 @@ void ADC(AddrMode am) {
             uint16_t index = GetIndirectZPAddrX(value);
             secValue = GetAbsolute(index);
             temp = CCPU->Accumulator + secValue;
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
         }
 
@@ -1574,7 +1646,7 @@ void ADC(AddrMode am) {
             uint16_t index = GetIndirectZPAddrY(value);
             secValue = GetAbsolute(index);
             temp = CCPU->Accumulator + secValue;
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
             break;
         }
         
@@ -1628,7 +1700,7 @@ void ASL(AddrMode am) {
 
         number <<= 1;
         CCPU->Accumulator = number;
-        UseCPUCycles(2U);
+        UseCPUCycles(1U);
     }
     else {
         uint8_t value = ReadProgramByte();
@@ -1645,7 +1717,7 @@ void ASL(AddrMode am) {
 
             number <<= 1;
             StoreZeroPage(value, number);
-            UseCPUCycles(5U);
+            UseCPUCycles(1U);
         }
         else if (am == AM_ZeroPageX) { // 6 cycles
             number = GetZeroPageX(value);
@@ -1659,7 +1731,7 @@ void ASL(AddrMode am) {
 
             number <<= 1;
             StoreZeroPageX(value, number);
-            UseCPUCycles(6U);
+            UseCPUCycles(1U);
         }
         else if (am == AM_Absolute) { // 6 cycles
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
@@ -1674,7 +1746,7 @@ void ASL(AddrMode am) {
 
             number <<= 1;
             StoreAbsolute(addr, number);
-            UseCPUCycles(6U);
+            UseCPUCycles(1U);
         }
         else if (am == AM_AbsoluteX) { // 7 cycles
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
@@ -1689,7 +1761,7 @@ void ASL(AddrMode am) {
 
             number <<= 1;
             StoreAbsoluteX(addr, number);
-            UseCPUCycles(7U);
+            UseCPUCycles(1U);
         }
         else {
             printf("Unhandled addressing\n");
@@ -1708,106 +1780,34 @@ void ASL(AddrMode am) {
 
 
 void BCC() { // 2 cycles (3 cycles if successful, 4 if crossing pages)
-    /*
-    uint8_t value = ReadProgramByte();
-    
-    if (!CheckBit(CCPU->Status, SFPos_Carry)) {
-        int8_t offset = (int8_t)value;
-        CCPU->PC += offset;
-    }
-    */
-
     BranchInstruction(SFPos_Carry, 0);
 }
 
 void BCS() { // 2 cycles (3 cycles if succeessful, 4 if crossing pages)
-    /*
-    uint8_t value = ReadProgramByte();
-    
-    if (CheckBit(CCPU->Status, SFPos_Carry)) {
-        int8_t offset = (int8_t)value;
-        CCPU->PC += offset;
-    }
-    */
-
     BranchInstruction(SFPos_Carry, 1);
 }
 
 void BEQ() { // 2 cycles (3 cycles if succeessful, 4 if crossing pages)
-    /*
-    uint8_t value = ReadProgramByte();
-    
-    if (CheckBit(CCPU->Status, SFPos_Zero)) {
-        int8_t offset = (int8_t)value;
-        CCPU->PC += offset;
-    }
-    */
-
     BranchInstruction(SFPos_Zero, 1);
 }
 
 void BMI() { // 2 cycles (3 cycles if succeessful, 4 if crossing pages)
-    /*
-    uint8_t value = ReadProgramByte();
-    
-    if (CheckBit(CCPU->Status, SFPos_Negative)) {
-        int8_t offset = (int8_t)value;
-        CCPU->PC += offset;
-    }
-    */
-
     BranchInstruction(SFPos_Negative, 1);
 }
 
 void BNE() { // 2 cycles (3 cycles if succeessful, 4 if crossing pages)
-    /*
-    uint8_t value = ReadProgramByte();
-    
-    if (!CheckBit(CCPU->Status, SFPos_Zero)) {
-        int8_t offset = (int8_t)value;
-        CCPU->PC += offset;
-    }
-    */
-
     BranchInstruction(SFPos_Zero, 0);
 }
 
 void BPL() { // 2 cycles (3 cycles if succeessful, 4 if crossing pages)
-    /*
-    uint8_t value = ReadProgramByte();
-    
-    if (!CheckBit(CCPU->Status, SFPos_Negative)) {
-        int8_t offset = (int8_t)value;
-        CCPU->PC += offset;
-    }
-    */
-
     BranchInstruction(SFPos_Negative, 0);
 }
 
 void BVC() { // 2 cycles (3 cycles if succeessful, 4 if crossing pages)
-    /*
-    uint8_t value = ReadProgramByte();
-    
-    if (!CheckBit(CCPU->Status, SFPos_Overflow)) {
-        int8_t offset = (int8_t)value;
-        CCPU->PC += offset;
-    }
-    */
-
     BranchInstruction(SFPos_Overflow, 0);
 }
 
 void BVS() { // 2 cycles (3 cycles if succeessful, 4 if crossing pages)
-    /*
-    uint8_t value = ReadProgramByte();
-    
-    if (CheckBit(CCPU->Status, SFPos_Overflow)) {
-        int8_t offset = (int8_t)value;
-        CCPU->PC += offset;
-    }
-    */
-
     BranchInstruction(SFPos_Overflow, 1);
 }
 
@@ -1820,12 +1820,12 @@ void BIT(AddrMode am) {
 
     if (am == AM_ZeroPage) { // 3 cycles
         number = GetZeroPage(value);
-        UseCPUCycles(3U);
+        //UseCPUCycles(3U);
     }
     else { // Absolute, 4 cycles
         uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
         number = GetAbsolute(addr);
-        UseCPUCycles(4U);
+        //UseCPUCycles(4U);
     }
 
     result = CCPU->Accumulator & number;
@@ -1865,7 +1865,7 @@ void BRK() { // 7 cycles
     CCPU->Status = SetBit(CCPU->Status, SFPos_InterruptDisable);
     CCPU->PC = 0xFFFEU;
 
-    UseCPUCycles(7U);
+    UseCPUCycles(1U);
 }
 
 
@@ -1876,51 +1876,51 @@ void CMP(AddrMode am) {
     switch (am) {
         case AM_Immediate: // 2 cycles
             valueToCompare = value;
-            UseCPUCycles(2U);
+            //UseCPUCycles(2U);
             break;
 
         case AM_ZeroPage: // 3 cycles
             valueToCompare = GetZeroPage(value);
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageX: // 4 cycles
             valueToCompare = GetZeroPageX(value);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
 
         case AM_Absolute: { // 4 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             valueToCompare = GetAbsolute(index);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteX: { // 4 cycles (5 if crossing pages)
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             valueToCompare = GetAbsoluteX(index);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteY: { // 4 cycles (5 if crossing pages)
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             valueToCompare = GetAbsoluteY(index);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
         
         case AM_IndirectX: { // 6 cycles
             uint16_t index = GetIndirectZPAddrX(value);
             valueToCompare = GetAbsolute(index);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
         }
 
         case AM_IndirectY: { // 5 cycles (6 if crossing pages)
             uint16_t index = GetIndirectZPAddrY(value);
             valueToCompare = GetAbsolute(index);
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
             break;
         }
 
@@ -1959,18 +1959,18 @@ void CPX(AddrMode am) {
     switch (am) {
         case AM_Immediate: // 2 cycles
             valueToCompare = value;
-            UseCPUCycles(2U);
+            //UseCPUCycles(2U);
             break;
 
         case AM_ZeroPage: // 3 cycles
             valueToCompare = GetZeroPage(value);
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_Absolute: { // 4 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             valueToCompare = GetAbsolute(index);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
@@ -2007,18 +2007,18 @@ void CPY(AddrMode am) {
     switch (am) {
         case AM_Immediate: // 2 cycles
             valueToCompare = value;
-            UseCPUCycles(2U);
+            //UseCPUCycles(2U);
             break;
 
         case AM_ZeroPage: // 3 cycles
             valueToCompare = GetZeroPage(value);
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_Absolute: { // 4 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             valueToCompare = GetAbsolute(index);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
@@ -2057,23 +2057,26 @@ void DEC(AddrMode am) {
         case AM_ZeroPage: // 5 cycles
             number = GetZeroPage(value);
             number--;
+            UseCPUCycles(1U);
             StoreZeroPage(value, number);
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
             break;
         
         case AM_ZeroPageX: // 6 cycles
             number = GetZeroPageX(value);
             number--;
+            UseCPUCycles(1U);
             StoreZeroPageX(value, number);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
 
         case AM_Absolute: { // 6 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             number = GetAbsolute(index);
             number--;
+            UseCPUCycles(1U);
             StoreAbsolute(index, number);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
         }
 
@@ -2081,8 +2084,9 @@ void DEC(AddrMode am) {
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             number = GetAbsoluteX(index);
             number--;
+            UseCPUCycles(1U);
             StoreAbsoluteX(index, number);
-            UseCPUCycles(7U);
+            //UseCPUCycles(7U);
             break;
         }
         
@@ -2100,7 +2104,7 @@ void DEX() { // 2 cycles
 
     CheckSetSFZero(CCPU->RegX);
     CheckSetSFNegative(CCPU->RegX);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void DEY() { // 2 cycles
@@ -2108,7 +2112,7 @@ void DEY() { // 2 cycles
 
     CheckSetSFZero(CCPU->RegY);
     CheckSetSFNegative(CCPU->RegY);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 
@@ -2125,23 +2129,26 @@ void INC(AddrMode am) {
         case AM_ZeroPage: // 5 cycles
             number = GetZeroPage(value);
             number++;
+            UseCPUCycles(1U);
             StoreZeroPage(value, number);
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
             break;
         
         case AM_ZeroPageX: // 6 cycles
             number = GetZeroPageX(value);
             number++;
+            UseCPUCycles(1U);
             StoreZeroPageX(value, number);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
 
         case AM_Absolute: { // 6 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             number = GetAbsolute(index);
             number++;
+            UseCPUCycles(1U);
             StoreAbsolute(index, number);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
         }
 
@@ -2149,8 +2156,9 @@ void INC(AddrMode am) {
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             number = GetAbsoluteX(index);
             number++;
+            UseCPUCycles(1U);
             StoreAbsoluteX(index, number);
-            UseCPUCycles(7U);
+            //UseCPUCycles(7U);
             break;
         }
 
@@ -2168,7 +2176,7 @@ void INX() { // 2 cycles
 
     CheckSetSFZero(CCPU->RegX);
     CheckSetSFNegative(CCPU->RegX);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void INY() { // 2 cycles
@@ -2176,7 +2184,7 @@ void INY() { // 2 cycles
 
     CheckSetSFZero(CCPU->RegY);
     CheckSetSFNegative(CCPU->RegY);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 
@@ -2187,11 +2195,11 @@ void JMP(AddrMode am) {
 
     if (am == AM_Absolute) { // 3 cycles
         CCPU->PC = addr;
-        UseCPUCycles(3U);
+        //UseCPUCycles(3U);
     }
     else if (am == AM_Indirect) { // 5 cycles
         CCPU->PC = GetIndirectAddr(addr);
-        UseCPUCycles(5U);
+        //UseCPUCycles(5U);
     }
 }
 
@@ -2208,7 +2216,7 @@ void JSR() { // 6 cycles
 
     CCPU->PC = addr;
 
-    UseCPUCycles(6U);
+    UseCPUCycles(1U);
 }
 
 void LDA(AddrMode am) {
@@ -2217,51 +2225,51 @@ void LDA(AddrMode am) {
     switch (am) {
         case AM_Immediate: // 2 cycles
             CCPU->Accumulator = value;
-            UseCPUCycles(2U);
+            //UseCPUCycles(2U);
             break;
 
         case AM_ZeroPage: // 3 cycles
             CCPU->Accumulator = GetZeroPage(value);
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageX: // 4 cycles
             CCPU->Accumulator = GetZeroPageX(value);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
 
         case AM_Absolute: { // 4 cycles
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
             CCPU->Accumulator = GetAbsolute(addr);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteX: { // 4 cycles (5 if crossing pages)
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
             CCPU->Accumulator = GetAbsoluteX(addr);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteY: { // 4 cycles (5 if crossing pages)
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
             CCPU->Accumulator = GetAbsoluteY(addr);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_IndirectX: { // 6 cycles
             uint16_t addr = GetIndirectZPAddrX(value);
             CCPU->Accumulator = GetAbsolute(addr);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
         }
 
         case AM_IndirectY: { // 5 cycles (6 if crossing pages)
             uint16_t addr = GetIndirectZPAddrY(value);
             CCPU->Accumulator = GetAbsolute(addr);
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
             break;
         }
         
@@ -2282,30 +2290,30 @@ void LDX(AddrMode am) {
     switch (am) {
         case AM_Immediate: // 2 cycles
             CCPU->RegX = value;
-            UseCPUCycles(2U);
+            //UseCPUCycles(2U);
             break;
 
         case AM_ZeroPage: // 3 cycles
             CCPU->RegX = GetZeroPage(value);
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageY: // 4 cycles
             CCPU->RegX = GetZeroPageY(value);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
 
         case AM_Absolute: { // 4 cycles
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
             CCPU->RegX = GetAbsolute(addr);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteY: { // 4 cycles (5 if crossing pages)
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
             CCPU->RegX = GetAbsoluteY(addr);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
         
@@ -2324,30 +2332,30 @@ void LDY(AddrMode am) {
     switch (am) {
         case AM_Immediate: // 2 cycles
             CCPU->RegY = value;
-            UseCPUCycles(2U);
+            //UseCPUCycles(2U);
             break;
 
         case AM_ZeroPage: // 3 cycles
             CCPU->RegY = GetZeroPage(value);
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageX: // 4 cycles
             CCPU->RegY = GetZeroPageX(value);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
 
         case AM_Absolute: { // 4 cycles
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
             CCPU->RegY = GetAbsolute(addr);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteX: { // 4 cycles (5 if crossing pages)
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
             CCPU->RegY = GetAbsoluteX(addr);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
         
@@ -2376,7 +2384,7 @@ void LSR(AddrMode am) {
 
         number >>= 1;
         CCPU->Accumulator = number;
-        UseCPUCycles(2U);
+        UseCPUCycles(1U);
     }
     else {
         uint8_t value = ReadProgramByte();
@@ -2392,8 +2400,9 @@ void LSR(AddrMode am) {
             }
 
             number >>= 1;
+            UseCPUCycles(1U);
             StoreZeroPage(value, number);
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
         }
         else if (am == AM_ZeroPageX) { // 6 cycles
             number = GetZeroPageX(value);
@@ -2406,8 +2415,9 @@ void LSR(AddrMode am) {
             }
 
             number >>= 1;
+            UseCPUCycles(1U);
             StoreZeroPageX(value, number);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
         }
         else if (am == AM_Absolute) { // 6 cycles
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
@@ -2421,8 +2431,9 @@ void LSR(AddrMode am) {
             }
 
             number >>= 1;
+            UseCPUCycles(1U);
             StoreAbsolute(addr, number);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
         }
         else if (am == AM_AbsoluteX) { // 7 cycles
             uint16_t addr = AssembleAbsoluteAddress(value, ReadProgramByte());
@@ -2436,8 +2447,9 @@ void LSR(AddrMode am) {
             }
 
             number >>= 1;
+            UseCPUCycles(1U);
             StoreAbsoluteX(addr, number);
-            UseCPUCycles(7U);
+            //UseCPUCycles(7U);
         }
         else {
             printf("Unhandled addressing\n");
@@ -2462,7 +2474,7 @@ void ORA(AddrMode am) {
 
 void PHA() { // 3 cycles
     PushByte(CCPU->Accumulator);
-    UseCPUCycles(3U);
+    UseCPUCycles(1U);
 }
 
 void PHP() { // 3 cycles
@@ -2475,21 +2487,25 @@ void PHP() { // 3 cycles
 
     //PushByte(CCPU->Status);
     
-    UseCPUCycles(3U);
+    UseCPUCycles(1U);
 }
 
 
 void PLA() { // 4 cycles
-    CCPU->Accumulator = PopByte();
+    uint8_t value = PopByte();
+    CCPU->Accumulator = value;
+    UseCPUCycles(1U);
 
     CheckSetSFZero(CCPU->Accumulator);
     CheckSetSFNegative(CCPU->Accumulator);
-    UseCPUCycles(4U);
+    UseCPUCycles(1U);
 }
 
 void PLP() { // 4 cycles
-    CCPU->Status = PopByte();
-    UseCPUCycles(4U);
+    uint8_t value = PopByte();
+    CCPU->Status = value;
+    UseCPUCycles(1U);
+    UseCPUCycles(1U);
 }
 
 
@@ -2508,7 +2524,7 @@ void ROL(AddrMode am) {
         }
 
         CCPU->Accumulator = number;
-        UseCPUCycles(2U);
+        UseCPUCycles(1U);
     }
     else {
         uint8_t value = ReadProgramByte();
@@ -2524,8 +2540,9 @@ void ROL(AddrMode am) {
                 number = SetBit(number, 0U);
             }
 
+            UseCPUCycles(1U);
             StoreZeroPage(value, number);
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
         }
         else if (am == AM_ZeroPageX) { // 6 cycles
             number = GetZeroPageX(value);
@@ -2538,8 +2555,9 @@ void ROL(AddrMode am) {
                 number = SetBit(number, 0U);
             }
 
+            UseCPUCycles(1U);
             StoreZeroPageX(value, number);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
         }
         else if (am == AM_Absolute) { // 6 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
@@ -2553,8 +2571,9 @@ void ROL(AddrMode am) {
                 number = SetBit(number, 0U);
             }
 
+            UseCPUCycles(1U);
             StoreAbsolute(index, number);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
         }
         else if (am == AM_AbsoluteX) { // 7 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
@@ -2568,8 +2587,9 @@ void ROL(AddrMode am) {
                 number = SetBit(number, 0U);
             }
 
+            UseCPUCycles(1U);
             StoreAbsoluteX(index, number);
-            UseCPUCycles(7U);
+            //UseCPUCycles(7U);
         }
         else {
             printf("Unhandled addressing\n");
@@ -2609,7 +2629,7 @@ void ROR(AddrMode am) {
         }
 
         CCPU->Accumulator = number;
-        UseCPUCycles(2U);
+        UseCPUCycles(1U);
     }
     else {
         uint8_t value = ReadProgramByte();
@@ -2625,8 +2645,9 @@ void ROR(AddrMode am) {
                 number = SetBit(number, 7U);
             }
 
+            UseCPUCycles(1U);
             StoreZeroPage(value, number);
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
         }
         else if (am == AM_ZeroPageX) { // 6 cycles
             number = GetZeroPageX(value);
@@ -2639,8 +2660,9 @@ void ROR(AddrMode am) {
                 number = SetBit(number, 7U);
             }
 
+            UseCPUCycles(1U);
             StoreZeroPageX(value, number);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
         }
         else if (am == AM_Absolute) { // 6 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
@@ -2654,8 +2676,9 @@ void ROR(AddrMode am) {
                 number = SetBit(number, 7U);
             }
 
+            UseCPUCycles(1U);
             StoreAbsolute(index, number);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
         }
         else if (am == AM_AbsoluteX) { // 7 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
@@ -2669,8 +2692,9 @@ void ROR(AddrMode am) {
                 number = SetBit(number, 7U);
             }
 
+            UseCPUCycles(1U);
             StoreAbsoluteX(index, number);
-            UseCPUCycles(7U);
+            //UseCPUCycles(7U);
         }
         else {
             printf("Unhandled addressing\n");
@@ -2707,7 +2731,8 @@ void RTI() { // 6 cycles
     CCPU->Status = status;
     uint16_t addr = AssembleAbsoluteAddress(low, high);
     CCPU->PC = addr;
-    UseCPUCycles(6U);
+    UseCPUCycles(1U);
+    UseCPUCycles(1U);
 }
 
 void RTS() { // 6 cycles
@@ -2715,8 +2740,11 @@ void RTS() { // 6 cycles
     uint8_t second = PopByte();
     uint16_t addr = AssembleAbsoluteAddress(first, second);
 
+    UseCPUCycles(1U);
+    UseCPUCycles(1U);
+
     CCPU->PC = addr + 1;
-    UseCPUCycles(6U);
+    UseCPUCycles(1U);
 }
 
 
@@ -2729,26 +2757,26 @@ void SBC(AddrMode am) {
         case AM_Immediate: // 2 cycles
             secValue = value;
             temp = CCPU->Accumulator - secValue;
-            UseCPUCycles(2U);
+            //UseCPUCycles(2U);
             break;
 
         case AM_ZeroPage: // 3 cycles
             secValue = GetZeroPage(value);
             temp = CCPU->Accumulator - secValue;
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageX: // 4 cycles
             secValue = GetZeroPageX(value);
             temp = CCPU->Accumulator - secValue;
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
 
         case AM_Absolute: { // 4 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             secValue = GetAbsolute(index);
             temp = CCPU->Accumulator - secValue;
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
@@ -2756,7 +2784,7 @@ void SBC(AddrMode am) {
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             secValue = GetAbsoluteX(index);
             temp = CCPU->Accumulator - secValue;
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
@@ -2764,7 +2792,7 @@ void SBC(AddrMode am) {
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             secValue = GetAbsoluteY(index);
             temp = CCPU->Accumulator - secValue;
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
@@ -2772,7 +2800,7 @@ void SBC(AddrMode am) {
             uint16_t index = GetIndirectZPAddrX(value);
             secValue = GetAbsolute(index);
             temp = CCPU->Accumulator - secValue;
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
         }
 
@@ -2780,7 +2808,7 @@ void SBC(AddrMode am) {
             uint16_t index = GetIndirectZPAddrY(value);
             secValue = GetAbsolute(index);
             temp = CCPU->Accumulator - secValue;
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
             break;
         }
         
@@ -2819,7 +2847,7 @@ void TAX() { // 2 cycles
 
     CheckSetSFZero(CCPU->RegX);
     CheckSetSFNegative(CCPU->RegX);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void TAY() { // 2 cycles
@@ -2827,7 +2855,7 @@ void TAY() { // 2 cycles
 
     CheckSetSFZero(CCPU->RegY);
     CheckSetSFNegative(CCPU->RegY);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void TXA() { // 2 cycles
@@ -2835,7 +2863,7 @@ void TXA() { // 2 cycles
 
     CheckSetSFZero(CCPU->Accumulator);
     CheckSetSFNegative(CCPU->Accumulator);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void TYA() { // 2 cycles
@@ -2843,7 +2871,7 @@ void TYA() { // 2 cycles
 
     CheckSetSFZero(CCPU->Accumulator);
     CheckSetSFNegative(CCPU->Accumulator);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 
@@ -2852,12 +2880,12 @@ void TSX() { // 2 cycles
 
     CheckSetSFZero(CCPU->RegX);
     CheckSetSFNegative(CCPU->RegX);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void TXS() { // 2 cycles
     CCPU->SP = CCPU->RegX;
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 
@@ -2867,46 +2895,46 @@ void STA(AddrMode am) {
     switch (am) {
         case AM_ZeroPage: // 3 cycles
             StoreZeroPage(value, CCPU->Accumulator);
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageX: // 4 cycles
             StoreZeroPageX(value, CCPU->Accumulator);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
     
         case AM_Absolute: { // 4 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             StoreAbsolute(index, CCPU->Accumulator);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
         }
 
         case AM_AbsoluteX: { // 5 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             StoreAbsoluteX(index, CCPU->Accumulator);
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
             break;
         }
 
         case AM_AbsoluteY: { // 5 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             StoreAbsoluteY(index, CCPU->Accumulator);
-            UseCPUCycles(5U);
+            //UseCPUCycles(5U);
             break;
         }
 
         case AM_IndirectX: { // 6 cycles
             uint16_t index = GetIndirectZPAddrX(value);
             StoreAbsolute(index, CCPU->Accumulator);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
         }
 
         case AM_IndirectY: { // 6 cycles
             uint16_t index = GetIndirectZPAddrY(value);
             StoreAbsolute(index, CCPU->Accumulator);
-            UseCPUCycles(6U);
+            //UseCPUCycles(6U);
             break;
         }
 
@@ -2922,18 +2950,18 @@ void STX(AddrMode am) {
     switch (am) {
         case AM_ZeroPage: // 3 cycles
             StoreZeroPage(value, CCPU->RegX);
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageY: // 4 cycles
             StoreZeroPageY(value, CCPU->RegX);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
     
         case AM_Absolute: // 4 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             StoreAbsolute(index, CCPU->RegX);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
 
         default:
@@ -2948,18 +2976,18 @@ void STY(AddrMode am) {
     switch (am) {
         case AM_ZeroPage: // 3 cycles
             StoreZeroPage(value, CCPU->RegY);
-            UseCPUCycles(3U);
+            //UseCPUCycles(3U);
             break;
 
         case AM_ZeroPageX: // 4 cycles
             StoreZeroPageX(value, CCPU->RegY);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
     
         case AM_Absolute: // 4 cycles
             uint16_t index = AssembleAbsoluteAddress(value, ReadProgramByte());
             StoreAbsolute(index, CCPU->RegY);
-            UseCPUCycles(4U);
+            //UseCPUCycles(4U);
             break;
 
         default:
@@ -2971,42 +2999,42 @@ void STY(AddrMode am) {
 
 void SEC() { // 2 cycles
     CCPU->Status = SetBit(CCPU->Status, SFPos_Carry);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void CLC() { // 2 cycles
     CCPU->Status = ClearBit(CCPU->Status, SFPos_Carry);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void SEI() { // 2 cycles
     CCPU->Status = SetBit(CCPU->Status, SFPos_InterruptDisable);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void CLI() { // 2 cycles
     CCPU->Status = ClearBit(CCPU->Status, SFPos_InterruptDisable);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void SED() { // 2 cycles
     CCPU->Status = SetBit(CCPU->Status, SFPos_DecimalMode);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void CLD() { // 2 cycles
     CCPU->Status = ClearBit(CCPU->Status, SFPos_DecimalMode);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void CLV() { // 2 cycles
     CCPU->Status = ClearBit(CCPU->Status, SFPos_Overflow);
-    UseCPUCycles(2U);
+    UseCPUCycles(1U);
 }
 
 void NOP(AddrMode am) { // 2 cycles
     if (am == AM_Implied) {
-        UseCPUCycles(2U);
+        UseCPUCycles(1U);
         return;
     }
 
@@ -3014,27 +3042,25 @@ void NOP(AddrMode am) { // 2 cycles
     
     switch (am) {
         case AM_Immediate:
-            UseCPUCycles(2U);
             break;
 
         case AM_ZeroPage:
-            UseCPUCycles(3U);
+            GetZeroPage(value);
             break;
 
         case AM_ZeroPageX:
-            UseCPUCycles(4U);
+            GetZeroPageX(value);
             break;
 
         case AM_Absolute: {
             uint8_t secValue = ReadProgramByte();
-            UseCPUCycles(4U);
+            GetAbsolute(AssembleAbsoluteAddress(value, secValue));
             break;
         }
 
         case AM_AbsoluteX: {
             uint8_t secValue = ReadProgramByte();
             GetAbsoluteX(AssembleAbsoluteAddress(value, secValue));
-            UseCPUCycles(4U);
             break;
         }
     }
@@ -3044,7 +3070,7 @@ void NOP(AddrMode am) { // 2 cycles
 void SLO(AddrMode am) {
     uint8_t value = ReadProgramByte();
     uint8_t number;
-    uint8_t cycles;
+    //uint8_t cycles;
 
     switch (am) {
         case AM_ZeroPage: // 5 cycles
@@ -3052,9 +3078,10 @@ void SLO(AddrMode am) {
             OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
 
             number <<= 1;
+            UseCPUCycles(1U);
             StoreZeroPage(value, number);
 
-            cycles = 5U;
+            //cycles = 5U;
             break;
 
         case AM_ZeroPageX: // 6 cycles
@@ -3062,9 +3089,10 @@ void SLO(AddrMode am) {
             OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
 
             number <<= 1;
+            UseCPUCycles(1U);
             StoreZeroPageX(value, number);
 
-            cycles = 6U;
+            //cycles = 6U;
             break;
 
         case AM_Absolute: { // 6 cycles
@@ -3073,9 +3101,10 @@ void SLO(AddrMode am) {
             OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
 
             number <<= 1;
+            UseCPUCycles(1U);
             StoreAbsolute(addr, number);
 
-            cycles = 6U;
+            //cycles = 6U;
             break;
         }
         
@@ -3085,9 +3114,10 @@ void SLO(AddrMode am) {
             OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
 
             number <<= 1;
+            UseCPUCycles(1U);
             StoreAbsoluteX(addr, number);
 
-            cycles = 7U;
+            //cycles = 7U;
             break;
         }
         
@@ -3097,9 +3127,10 @@ void SLO(AddrMode am) {
             OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
 
             number <<= 1;
+            UseCPUCycles(1U);
             StoreAbsoluteY(addr, number);
 
-            cycles = 7U;
+            //cycles = 7U;
             break;
         }
 
@@ -3109,9 +3140,10 @@ void SLO(AddrMode am) {
             OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
 
             number <<= 1;
+            UseCPUCycles(1U);
             StoreAbsolute(addr, number);
             
-            cycles = 8U;
+            //cycles = 8U;
             break;
         }
 
@@ -3121,9 +3153,10 @@ void SLO(AddrMode am) {
             OverrideBit8(&CCPU->Status, SFPos_Carry, CheckBit(number, 7U));
 
             number <<= 1;
+            UseCPUCycles(1U);
             StoreAbsolute(addr, number);
 
-            cycles = 8U;
+            //cycles = 8U;
             break;
         }
         
@@ -3137,5 +3170,5 @@ void SLO(AddrMode am) {
     CheckSetSFZero(CCPU->Accumulator);
     CheckSetSFNegative(CCPU->Accumulator);
 
-    UseCPUCycles(cycles);
+    //UseCPUCycles(cycles);
 }
