@@ -8,6 +8,9 @@
 
 SystemType System = SYS_NTSC;
 
+const float APUSampleDivider_NTSC = (float)CPUClockSpeed_NTSC / (float)SampleRate / 2;
+const float APUSampleDivider_PAL = (float)CPUClockSpeed_PAL / (float)SampleRate / 2;
+
 uint32_t CPUTimeStamp = 0;   // How many master cycles the CPU has used this frame
 uint32_t PPUTimeStamp = 0;   // How many master cycles the PPU has used this frame
 uint32_t CPUCycleCount = 0;  // How many CPU cycles has been used this frame
@@ -24,8 +27,7 @@ uint16_t CurDot = 0;
 uint8_t* BGFrameBuffer = NULL;
 uint8_t* SPRFrameBuffer = NULL;
 
-int16_t* SQ0SoundBuffer = NULL;
-int16_t* SQ1SoundBuffer = NULL;
+int16_t* SoundBuffer = NULL;
 
 uint8_t DMAOccured = 0;
 bool QueueNMI = false;

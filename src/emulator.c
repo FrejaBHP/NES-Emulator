@@ -200,12 +200,16 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
         SDL_Log("Can't render present: %s", SDL_GetError());
     }
 
+    /*
     if (!AlternateFrame) {
-        SDL_PutAudioStreamData(ST_SQ[0].Stream, SQ0SoundBuffer, 1600);
+        SDL_PutAudioStreamData(ST_SQ[0].Stream, SQ0SoundBuffer, SampleCounter * 2);
     }
     else {
-        SDL_PutAudioStreamData(ST_SQ[0].Stream, SQ1SoundBuffer, 1600);
+        SDL_PutAudioStreamData(ST_SQ[0].Stream, SQ1SoundBuffer, SampleCounter * 2);
     }
+    */
+
+    SDL_PutAudioStreamData(Stream, SoundBuffer, SampleCounter * 2);
 
     AlternateFrame = !AlternateFrame;
     SampleCounter = 0;
@@ -229,8 +233,7 @@ void SDL_AppQuit(void* appstate, SDL_AppResult result) {
     DumpStateLog((size_t)result);
 
     SDL_CloseAudioDevice(AudioDevice);
-    SDL_DestroyAudioStream(ST_SQ[0].Stream);
-    SDL_DestroyAudioStream(ST_SQ[1].Stream);
+    SDL_DestroyAudioStream(Stream);
     
     /* SDL will clean up the window/renderer for us. */
 }

@@ -36,6 +36,12 @@ typedef struct EmuState {
     uint8_t RegY;
 } EmuState;
 
+#define CPUClockSpeed_NTSC      1789773 // Hz
+#define CPUClockSpeed_PAL       1662607 // Hz
+
+#define DesiredFrameRateNTSC    60.0998
+#define DesiredFrameRatePAL     50.0070
+
 // Horizontal resolution is 256, with 85 extra for the horizontal blanking period, making up 256 + 85 = 341 scanline length
 #define Scanline_Length         341 // in PPU pixels/cycles
 #define HBlank_Length            85 // in PPU pixels/cycles
@@ -49,7 +55,7 @@ typedef struct EmuState {
 #define VBlankTime_NTSC         Scanline_Length * VBlankScanlines_NTSC * PPUCycleDivider
 #define VBlankTime_PAL          Scanline_Length * VBlankScanlines_PAL * PPUCycleDivider
 
-#define NumDots_NTSC            ((Scanline_Length * Scanlines_NTSC) - 0.5) // Number of dots per frame. Every odd frame has -1 dot
+#define NumDots_NTSC            ((Scanline_Length * Scanlines_NTSC) - 0.5) // Number of dots per frame. Every odd rendering frame has -1 dot
 #define NumCPUCycles_NTSC       (NumDots_NTSC / 3) // Number of CPU cycles available per frame
 
 #define NumDots_PAL             (Scanline_Length * Scanlines_PAL) // Number of dots per frame
@@ -60,6 +66,9 @@ typedef struct EmuState {
 #define PPUCycleDivider           5
 
 extern SystemType System;
+
+extern const float APUSampleDivider_NTSC;
+extern const float APUSampleDivider_PAL;
 
 extern uint32_t CPUTimeStamp;   // How many master cycles the CPU has used this frame
 extern uint32_t PPUTimeStamp;   // How many master cycles the PPU has used this frame
@@ -77,8 +86,7 @@ extern uint16_t CurDot;
 extern uint8_t* BGFrameBuffer;
 extern uint8_t* SPRFrameBuffer;
 
-extern int16_t* SQ0SoundBuffer;
-extern int16_t* SQ1SoundBuffer;
+extern int16_t* SoundBuffer;
 
 extern uint8_t DMAOccured;
 extern bool QueueNMI;

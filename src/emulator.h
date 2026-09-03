@@ -11,9 +11,6 @@
 #define Window_Height       240 * 2
 #define Window_Width        256 * 2
 
-#define DesiredFrameRateNTSC    60.0998
-#define DesiredFrameRatePAL     50.0070
-
 extern SDL_Window* Window;
 extern SDL_Renderer* Renderer;
 extern SDL_Texture* BGTexture;

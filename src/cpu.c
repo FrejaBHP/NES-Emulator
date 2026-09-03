@@ -335,6 +335,22 @@ uint8_t GetAbsolute(uint16_t index) {
             retValue >>= 5;
             retValue <<= 5;
 
+            if (ST_SQ[0].LengthCounter > 0) {
+                OverrideBit8(&retValue, 0, 1);
+            }
+
+            if (ST_SQ[1].LengthCounter > 0) {
+                OverrideBit8(&retValue, 1, 1);
+            }
+
+            if (ST_TRI.LengthCounter > 0) {
+                OverrideBit8(&retValue, 2, 1);
+            }
+
+            if (ST_NOISE.LengthCounter > 0) {
+                OverrideBit8(&retValue, 3, 1);
+            }
+
             CPUMemory[SND_CHN] = ClearBit(CPUMemory[SND_CHN], 6U);
 
             //OverrideBit8(&retValue, SCPos_DMC, )
@@ -453,6 +469,12 @@ void StoreAbsolute(uint16_t index, const uint8_t value) {
             WriteToPPUADDR();
             break;
 
+        case PPU_PPUDATA:
+            //CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToPPUDATA();
+            break;
+
         case SQ1_VOL:
             CPUMemory[index] = value;
             CurPPU->DataBus = value;
@@ -501,10 +523,52 @@ void StoreAbsolute(uint16_t index, const uint8_t value) {
             WriteToSQ(value, 3, 1);
             break;
 
-        case PPU_PPUDATA:
-            //CPUMemory[index] = value;
+        case TRI_LINEAR:
+            CPUMemory[index] = value;
             CurPPU->DataBus = value;
-            WriteToPPUDATA();
+            WriteToTRI(value, 0);
+            break;
+
+        case TRI_UNUSED:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToTRI(value, 1);
+            break;
+
+        case TRI_LO:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToTRI(value, 2);
+            break;
+
+        case TRI_HI:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToTRI(value, 3);
+            break;
+
+        case NOISE_VOL:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToNOISE(value, 0);
+            break;
+
+        case NOISE_UNUSED:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToNOISE(value, 1);
+            break;
+
+        case NOISE_LO:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToNOISE(value, 2);
+            break;
+
+        case NOISE_HI:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToNOISE(value, 3);
             break;
 
         case OAMDMA:
