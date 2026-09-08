@@ -73,7 +73,6 @@ extern const float APUSampleDivider_PAL;
 extern uint32_t CPUTimeStamp;   // How many master cycles the CPU has used this frame
 extern uint32_t PPUTimeStamp;   // How many master cycles the PPU has used this frame
 extern uint32_t CPUCycleCount;  // How many CPU cycles has been used this frame
-//extern uint32_t CPUCycleCountLast;
 extern uint32_t PPUCycleCount;  // How many PPU cycles has been used this frame
 extern uint8_t CPUCyclesCarry;
 
@@ -115,6 +114,7 @@ void RunPPU(uint32_t timestamp);
 
 void DrawBGLayer();
 void DrawBGPixel(uint8_t x, uint8_t y);
+void DrawBGPixelV(uint8_t x, uint8_t y);
 void GetValidSPR(SpriteData* sprites);
 void DrawSPRLayer();
 void DrawSPR(SpriteData* spr);

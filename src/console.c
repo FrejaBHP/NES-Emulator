@@ -14,7 +14,6 @@ const float APUSampleDivider_PAL = (float)CPUClockSpeed_PAL / (float)SampleRate 
 uint32_t CPUTimeStamp = 0;   // How many master cycles the CPU has used this frame
 uint32_t PPUTimeStamp = 0;   // How many master cycles the PPU has used this frame
 uint32_t CPUCycleCount = 0;  // How many CPU cycles has been used this frame
-//uint32_t CPUCycleCountLast = 0;
 uint32_t PPUCycleCount = 0;  // How many PPU cycles has been used this frame
 uint8_t CPUCyclesCarry = 0;
 
@@ -42,8 +41,6 @@ uint8_t Input0Buffer = 0;
 
 EmuState States[16] = { 0 };
 size_t StateIndex = 0;
-
-uint16_t temp = 0x2000;
 
 void SetupConsole() {
     if (CurROM->TimingMode == TMode_RP2C02) {
@@ -162,22 +159,51 @@ void RunPPU(uint32_t timestamp) {
     }
 
     while (PPUTimeStamp < timestamp) {
+        if (BGRenderFlagCountdown > 0) {
+            BGRenderFlagCountdown--;
+        }
+        else if (BGRenderFlagCountdown == 0) {
+            BGRenderFlagCountdown = -1;
+            BGRenderingEnabled = PendingBGRenderFlag;
+        }
+
+        if (SPRRenderFlagCountdown > 0) {
+            SPRRenderFlagCountdown--;
+        }
+        else if (SPRRenderFlagCountdown == 0) {
+            SPRRenderFlagCountdown = -1;
+            SPRRenderingEnabled = PendingSPRRenderFlag;
+        }
+
         // End of VBlank
-        if (CurScanline == -1 && CurDot == 1) {
-            OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_VBlank, 0);
-            OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_Sprite0Hit, 0);
+        if (CurScanline == -1) {
+            if (CurDot == 1) {
+                OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_VBlank, 0);
+                OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_Sprite0Hit, 0);
+            }
+            else if (CurDot >= 280 && CurDot < 305) {
+                uint16_t v = CurPPU->RegV;
+                uint16_t t = CurPPU->RegT;
+
+                v &= 0b000010000011111;
+                t &= 0b111101111100000;
+
+                v |= t;
+
+                CurPPU->RegV = v;
+            }
         }
 
         // Drawing loop
         if (CurScanline >= 0 && CurScanline <= 239) {
             if (CurScanline == 30 && CurDot == 91) {
-                if (CheckBit(*CurPPU->PPUMASK, PPUMASK_EnableBGRendering) && CheckBit(*CurPPU->PPUMASK, PPUMASK_EnableSPRRendering)) {
+                if (BGRenderingEnabled && SPRRenderingEnabled) {
                     OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_Sprite0Hit, 1);
                 }
             }
 
             if (CurDot != 0 && CurDot < 257) {
-                DrawBGPixel((uint8_t)(CurDot - 1), (uint8_t)CurScanline);
+                DrawBGPixelV((uint8_t)(CurDot - 1), (uint8_t)CurScanline);
             }
         }
         // VBlank
@@ -193,11 +219,20 @@ void RunPPU(uint32_t timestamp) {
             DrawSPRLayer();
         }
 
+        //if (CurDot % 8 == 0 && (CurDot >= 328 || CurDot <= 256)) {
+        if (CurDot != 0 && CurDot % 8 == 0 && CurDot <= 256) {
+            if (BGRenderingEnabled) {
+                PPUIncCoarseX();
+            }
+        }
+
         if (CurDot == 256) {
-            
+            if (BGRenderingEnabled) {
+                PPUIncFineY();
+            }
         }
         else if (CurDot == 257) {
-            if (CheckBit(*CurPPU->PPUMASK, PPUMASK_EnableBGRendering)) {
+            if (BGRenderingEnabled) {
                 uint16_t temp = CurPPU->RegV;
                 OverrideBit16(&temp, 10, CheckBit(GetHighByte(CurPPU->RegT), 2));
                 temp >>= 5;
@@ -397,16 +432,6 @@ void DrawBGPixel(uint8_t x, uint8_t y) {
         scrAddr -= 0x20U;
     }
 
-    if (ntBaseAddr != temp) {
-        //printf("NewBAd    BaseAddr: %04X, ScrAddr: %04X, V: %04X, X: %02u, Y: %02u, PC: %04X\n", ntBaseAddr, scrAddr, CurPPU->RegV, x, y, CCPU->PC);
-    }
-
-    if (x == 32 && y == 16) {
-        //printf("X32Y16    BaseAddr: %04X, ScrAddr: %04X, V: %04X\n", ntBaseAddr, scrAddr, CurPPU->RegV);
-    }
-
-    temp = ntBaseAddr;
-
     const uint16_t tileID = PPURead(scrAddr);
     const uint16_t bgTileAddr = GetBaseBGPatternTableAddress() + (tileID * 0x10) + (y % 8);
     const uint16_t tileAttr = GetAttribute(scrAddr);
@@ -417,6 +442,85 @@ void DrawBGPixel(uint8_t x, uint8_t y) {
     uint16_t paletteIndex = PaletteRAMIndeces_Start + paletteOffset + pixel;
 
     // Might need some tweaking once sprites exist
+    if (paletteIndex % 4 == 0) {
+        paletteIndex = 0x3F00U;
+    }
+
+    BGFrameBuffer[(y * 256 * 3) + (x * 3)] = (Palette_NTSC[PPURead(paletteIndex)] >> 16) & 0xFF;
+    BGFrameBuffer[(y * 256 * 3) + (x * 3) + 1] = (Palette_NTSC[PPURead(paletteIndex)] >> 8) & 0xFF;
+    BGFrameBuffer[(y * 256 * 3) + (x * 3) + 2] = (Palette_NTSC[PPURead(paletteIndex)]) & 0xFF;
+}
+
+void DrawBGPixelV(uint8_t x, uint8_t y) {
+    // How many tiles we're offset in either direction
+    const uint8_t coarseX = (uint8_t)(CurPPU->RegV & 0b11111);
+    const uint8_t coarseY = (uint8_t)((CurPPU->RegV & 0b1111100000) >> 5);
+
+    // Are we scrolling partially through a tile on the X-axis? (called crossing here)
+    bool crossingX = ((x & 7) + CurPPU->RegX) > 7;
+
+    uint16_t tileAddr;
+    uint16_t attrAddr;
+
+    // If crossing X, grab the next tile if we've reached it
+    if (crossingX) {
+        const uint16_t simV = SimulateIncCoarseX();
+        tileAddr = GetOffsetTileAddress(simV);
+        attrAddr = GetOffsetAttributeAddress(simV);
+    }
+    else {
+        tileAddr = GetTileAddress();
+        attrAddr = GetAttributeAddress();
+    }
+    
+    const uint8_t tileVal = PPURead(tileAddr);
+    const uint8_t attrVal = PPURead(attrAddr);
+
+    const uint16_t patternAddr = GetBaseBGPatternTableAddress() + (tileVal * 0x10) + (y % 8);
+
+    uint8_t attrRegX;
+    const uint8_t attrRegY = coarseY & 2 ? 1 : 0;
+
+    // Also grab the appropriate attribute if crossing
+    if (crossingX) {
+        attrRegX = (coarseX + 1) & 2 ? 1 : 0;
+    }
+    else {
+        attrRegX = coarseX & 2 ? 1 : 0;
+    }
+
+    // Which quadrant is the pixel in? 0 = top left, 1 = top right, 2 = bottom left, 3 = bottom right
+    const uint8_t attrIndex = attrRegX + (attrRegY * 2);
+
+    uint8_t attrPartIndex = 0;
+
+    switch (attrIndex) {
+        case 0:
+            attrPartIndex = attrVal & 0b00000011;
+            break;
+
+        case 1:
+            attrPartIndex = (attrVal & 0b00001100) >> 2;
+            break;
+
+        case 2:
+            attrPartIndex = (attrVal & 0b00110000) >> 4;
+            break;
+
+        case 3:
+            attrPartIndex = (attrVal & 0b11000000) >> 6;
+            break;
+        
+        default:
+            break;
+    }
+
+    // Grabs the appropriate bitplane from the pattern table and gets the colour palette index value of the desired pixel in the tile we're drawing
+    const uint8_t pixel = ((PPURead(patternAddr) >> (7 - ((x + CurPPU->RegX % 8) % 8))) & 1) + (((PPURead(patternAddr + 8) >> (7 - ((x + CurPPU->RegX % 8) % 8))) & 1) * 2);
+
+    uint16_t paletteIndex = PaletteRAMIndeces_Start + (attrPartIndex * 4) + pixel;
+
+    // Needs some tweaks to work with sprite priority
     if (paletteIndex % 4 == 0) {
         paletteIndex = 0x3F00U;
     }

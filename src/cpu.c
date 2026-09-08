@@ -440,6 +440,7 @@ void StoreAbsolute(uint16_t index, const uint8_t value) {
         case PPU_PPUMASK:
             CPUMemory[index] = value;
             CurPPU->DataBus = value;
+            OnWriteToPPUMASK();
             break;
 
         case PPU_PPUSTATUS:

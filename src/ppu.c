@@ -27,6 +27,16 @@ uint32_t Palette_NTSC[64] = {
     0xFFFEFF, 0xC0DFFF, 0xD3D2FF, 0xE8C8FF, 0xFBC2FF, 0xFEC4EA, 0xFECCC5, 0xF7D8A5, 0xE4E594, 0xCFEF96, 0xBDF4AB, 0xB3F3CC, 0xB5EBF2, 0xB8B8B8, 0x000000, 0x000000
 };
 
+
+int8_t BGRenderFlagCountdown = 0;
+int8_t SPRRenderFlagCountdown = 0;
+
+uint8_t PendingBGRenderFlag = 0;
+uint8_t PendingSPRRenderFlag = 0;
+
+bool BGRenderingEnabled = false;
+bool SPRRenderingEnabled = false;
+
 void PPUSetV(uint16_t value) {
     //printf("Set V - PreValue: %04X\n", value);
     if (value > VMAX) {
@@ -66,6 +76,75 @@ void PPUSetW(uint8_t value) {
 
     CurPPU->RegW = value;
 }
+
+void PPUIncCoarseX() {
+    // Bits 0-4 are incremented, with overflow toggling bit 10
+
+    if ((CurPPU->RegV & 0x001F) == 31) {
+        CurPPU->RegV &= ~0x001F;                // set Coarse X to 0
+        CurPPU->RegV ^= 0x0400;                 // switch horizontal nametable
+    }
+    else {
+        CurPPU->RegV += 1;                      // increment Coarse X
+    }
+}
+
+uint16_t SimulateIncCoarseX() {
+    uint16_t retValue = CurPPU->RegV;
+
+    if ((CurPPU->RegV & 0x001F) == 31) {
+        retValue &= ~0x001F;                // set Coarse X to 0
+        retValue ^= 0x0400;                 // switch horizontal nametable
+    }
+    else {
+        retValue += 1;                      // increment Coarse X
+    }
+
+    return retValue;
+}
+
+void PPUIncFineY() {
+    // Bits 12-14 are fine Y. Bits 5-9 are coarse Y. Bit 11 selects the vertical nametable
+
+    if ((CurPPU->RegV & 0x7000) != 0x7000) {    // if Fine Y < 7
+        CurPPU->RegV += 0x1000;                 // increment Fine Y
+    }
+    else {
+        CurPPU->RegV &= ~0x7000;                // set Fine Y to 0
+
+        uint16_t coarseY = (CurPPU->RegV & 0x03E0) >> 5;
+
+        if (coarseY == 29) {                    // if last row of tiles in nametable
+            coarseY = 0;
+            CurPPU->RegV ^= 0x0800;             // change vertical nametable
+        }
+        else if (coarseY == 31) {
+            coarseY = 0;                        // wrap without changing nametable
+        }
+        else {
+            coarseY += 1;                       // increment Coarse Y
+        }
+
+        CurPPU->RegV = (CurPPU->RegV & ~0x03E0) | (coarseY << 5);   // update V with Coarse Y value
+    }
+}
+
+uint16_t GetTileAddress() {
+    return (uint16_t)(0x2000U | (CurPPU->RegV & 0x0FFFU));
+}
+
+uint16_t GetOffsetTileAddress(uint16_t simV) {
+    return (uint16_t)(0x2000U | (simV & 0x0FFFU));
+}
+
+uint16_t GetAttributeAddress() {
+    return (uint16_t)(0x23C0U | (CurPPU->RegV & 0x0C00U) | ((CurPPU->RegV >> 4) & 0x38) | ((CurPPU->RegV >> 2) & 0x07));
+}
+
+uint16_t GetOffsetAttributeAddress(uint16_t simV) {
+    return (uint16_t)(0x23C0U | (simV & 0x0C00U) | ((simV >> 4) & 0x38) | ((simV >> 2) & 0x07));
+}
+
 
 void PPUWrite(uint16_t index, uint8_t value) {
     if (index > 0x3FFFU) {
@@ -220,6 +299,14 @@ void OnWriteToPPUCTRL() {
     OverrideBit16(&CurPPU->RegT, 10, CheckBit(*CurPPU->PPUCTRL, 0));
     OverrideBit16(&CurPPU->RegT, 11, CheckBit(*CurPPU->PPUCTRL, 1));
     RunPPU(CPUTimeStamp);
+}
+
+void OnWriteToPPUMASK() {
+    BGRenderFlagCountdown = 3;
+    PendingBGRenderFlag = CheckBit(*CurPPU->PPUMASK, 3);
+
+    SPRRenderFlagCountdown = 3;
+    PendingSPRRenderFlag = CheckBit(*CurPPU->PPUMASK, 4);
 }
 
 void OnWriteToPPUSCROLL() {

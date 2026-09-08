@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 
 #define PPUCTRL_BaseNameTableAddrLow        0U
@@ -189,10 +190,28 @@ extern uint8_t* PPUMemory;
 extern uint32_t Palette_NTSC[64];
 extern uint32_t Palette_NTSC_old[64];
 
+extern int8_t BGRenderFlagCountdown;
+extern int8_t SPRRenderFlagCountdown;
+
+extern uint8_t PendingBGRenderFlag;
+extern uint8_t PendingSPRRenderFlag;
+
+extern bool BGRenderingEnabled;
+extern bool SPRRenderingEnabled;
+
 void PPUSetV(uint16_t value);
 void PPUSetT(uint16_t value, uint8_t clearBit);
 void PPUSetX(uint8_t value);
 void PPUSetW(uint8_t value);
+
+void PPUIncCoarseX();
+uint16_t SimulateIncCoarseX();
+void PPUIncFineY();
+
+uint16_t GetTileAddress();
+uint16_t GetOffsetTileAddress(uint16_t simV);
+uint16_t GetAttributeAddress();
+uint16_t GetOffsetAttributeAddress(uint16_t simV);
 
 void PPUWrite(uint16_t index, uint8_t value);
 uint8_t PPURead(uint16_t index);
@@ -210,6 +229,7 @@ void OnReadPPUSTATUS();
 void OnReadPPUDATA();
 
 void OnWriteToPPUCTRL();
+void OnWriteToPPUMASK();
 void OnWriteToPPUSCROLL();
 void OnWriteToPPUADDR();
 void OnWriteToPPUDATA();
