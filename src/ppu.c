@@ -13,6 +13,9 @@
 PPU* CurPPU = NULL;
 uint8_t* PPUMemory = NULL;
 
+uint8_t PPUAXNTSelect = 0;
+uint8_t* PPUAXMem = NULL;
+
 uint32_t Palette_NTSC_old[64] = {
     0x7C7C7C, 0x0000FC, 0x0000BC, 0x4428BC, 0x940084, 0xA80020, 0xA81000, 0x881400, 0x503000, 0x007800, 0x006800, 0x005800, 0x004058, 0x000000, 0x000000, 0x000000,
     0xBCBCBC, 0x0078F8, 0x0058F8, 0x6844FC, 0xD800CC, 0xE40058, 0xF83800, 0xE45C10, 0xAC7C00, 0x00B800, 0x00A800, 0x00A844, 0x008888, 0x000000, 0x000000, 0x000000,
@@ -34,8 +37,36 @@ int8_t SPRRenderFlagCountdown = 0;
 uint8_t PendingBGRenderFlag = 0;
 uint8_t PendingSPRRenderFlag = 0;
 
+Sprite0Data SPR0Data = { 0 };
+
 bool BGRenderingEnabled = false;
 bool SPRRenderingEnabled = false;
+
+void PPUInit() {
+    CurPPU = malloc(sizeof(PPU));
+    PPUMemory = calloc(1, 0x4000U);
+
+    CurPPU->RegV = 0;
+    CurPPU->RegT = 0;
+    CurPPU->RegX = 0;
+    CurPPU->RegW = 0;
+
+    CurPPU->PPUCTRL = &CPUMemory[PPU_PPUCTRL];
+    CurPPU->PPUMASK = &CPUMemory[PPU_PPUMASK];
+    CurPPU->PPUSTATUS = &CPUMemory[PPU_PPUSTATUS];
+    CurPPU->OAMADDR = &CPUMemory[PPU_OAMADDR];
+    CurPPU->OAMDATA = &CPUMemory[PPU_OAMDATA];
+    CurPPU->PPUSCROLL = &CPUMemory[PPU_PPUSCROLL];
+    CurPPU->PPUADDR = &CPUMemory[PPU_PPUADDR];
+    CurPPU->PPUDATA = &CPUMemory[PPU_PPUDATA];
+}
+
+void PPUPostInit() {
+    if (CurROM->MapperNumber == (uint16_t)Map_AxROM) {
+        PPUAXMem = malloc(0x400U);
+    }
+}
+
 
 void PPUSetV(uint16_t value) {
     //printf("Set V - PreValue: %04X\n", value);
@@ -103,6 +134,27 @@ uint16_t SimulateIncCoarseX() {
     return retValue;
 }
 
+uint16_t SimulateIncCoarseY() {
+    uint16_t retValue = CurPPU->RegV;
+
+    uint16_t coarseY = (CurPPU->RegV & 0x03E0) >> 5;
+
+    if (coarseY == 29) {                    // if last row of tiles in nametable
+        coarseY = 0;
+        retValue ^= 0x0800;                 // change vertical nametable
+    }
+    else if (coarseY == 31) {
+        coarseY = 0;                        // wrap without changing nametable
+    }
+    else {
+        coarseY += 1;                       // increment Coarse Y
+    }
+
+    retValue = (retValue & ~0x03E0) | (coarseY << 5);   // update V with Coarse Y value
+
+    return retValue;
+}
+
 void PPUIncFineY() {
     // Bits 12-14 are fine Y. Bits 5-9 are coarse Y. Bit 11 selects the vertical nametable
 
@@ -145,35 +197,66 @@ uint16_t GetOffsetAttributeAddress(uint16_t simV) {
     return (uint16_t)(0x23C0U | (simV & 0x0C00U) | ((simV >> 4) & 0x38) | ((simV >> 2) & 0x07));
 }
 
+void PPUAXSwapNT(uint8_t num) {
+    PPUAXNTSelect = num;
+    //printf("Swapped nametable. Table: %u. PC: %04X. Scanline: %i\n", num, CCPU->PC - 3, CurScanline);
+}
+
 
 void PPUWrite(uint16_t index, uint8_t value) {
     if (index > 0x3FFFU) {
-        StopExecution = 1;
+        //StopExecution = 1;
+        printf("Tried to write above 0x3FFF in VRAM. Index: %04X. V: %04X, T: %04X. PC: %04X. Scanline: %i\n", index, CurPPU->RegV, CurPPU->RegT, CCPU->PC - 3, CurScanline);
+        //printf("Wrote %02X to %04X. PC: %04X. Scanline: %i\n", value, index, CCPU->PC - 3, CurScanline);
         //index = index % 0x4000U;
         return;
     }
     else if (index < 0x2000U) {
-        //StopExecution = 1;
-        return;
+        if (CurROM->CHR_ROM_Size != 0) {
+            //printf("Tried to write below 0x2000 in VRAM. Index: %04X. V: %04X, T: %04X. PC: %04X. Scanline: %i\n", index, CurPPU->RegV, CurPPU->RegT, CCPU->PC - 3, CurScanline);
+            return;
+        }
+        else {
+            PPUMemory[index] = value;
+            return;
+        }
     }
 
-    PPUMemory[index] = value;
-
-    if (!CurROM->HasAltNTL) {
-        if (CurROM->Layout == NTL_Vertical) {
-            if ((index >= 0x2000U && index < 0x23FFU) || (index >= 0x2800U && index < 0x2BFFU)) {
-                PPUMemory[index + 0x0400U] = value;
+    if (index >= 0x2000U && index < 0x3F00U) {
+        if (CurROM->MapperNumber != (uint16_t)Map_AxROM) {
+            if (!CurROM->HasAltNTL) {
+                if (CurROM->Layout == NTL_Vertical) {
+                    if ((index >= 0x2000U && index < 0x2400U) || (index >= 0x2800U && index < 0x2C00U)) {
+                        PPUMemory[index] = value;
+                        PPUMemory[index + 0x0400U] = value;
+                    }
+                }
+                else if (CurROM->Layout == NTL_Horizontal) {
+                    if ((index >= 0x2000U && index < 0x2400U) || (index >= 0x2400U && index < 0x2800U)) {
+                        PPUMemory[index] = value;
+                        PPUMemory[index + 0x0800U] = value;
+                    }
+                }
             }
         }
-        else if (CurROM->Layout == NTL_Horizontal) {
-            if ((index >= 0x2000U && index < 0x23FFU) || (index >= 0x2400U && index < 0x27FFU)) {
+        else {
+            if (PPUAXNTSelect == 0 && index < 0x2400U) {
+                PPUMemory[index] = value;
+                PPUMemory[index + 0x0400U] = value;
                 PPUMemory[index + 0x0800U] = value;
+                PPUMemory[index + 0x0C00U] = value;
+            }
+            else {
+                PPUAXMem[(index - 0x2000U) % 0x0400U] = value;
+                return;
             }
         }
     }
 
     // Each palette value 0 is mirrored between BG and SPR
     if (index >= 0x3F00U) {
+        PPUMemory[index] = value;
+
         if (index % 4 == 0) {
             if (index >= 0x3F10U) {
                 PPUMemory[index - 0x10U] = value;
@@ -183,19 +266,52 @@ void PPUWrite(uint16_t index, uint8_t value) {
             }
         }
     }
+
+    /*
+    if (index >= 0x2BE0 && index < 0x2BF0) {
+        printf("Wrote %02X to %04X. PC: %04X. Scanline: %i\n", value, index, CCPU->PC - 3, CurScanline);
+    }
+    */
 }
 
 uint8_t PPURead(uint16_t index) {
     // Safety precaution
     if (index > 0x3FFFU) {
+        printf("Tried to read above 0x3FFF in VRAM. Index: %04X. V: %04X, T: %04X. PC: %04X. Scanline: %i\n", index, CurPPU->RegV, CurPPU->RegT, CCPU->PC - 3, CurScanline);
         index = index % 0x4000U;
-        StopExecution = 1;
     }
     else if (index >= 0x3F20U) {
         index = (index % (uint16_t)PaletteRAMIndeces_Size) + (uint16_t)PaletteRAMIndeces_Start;
     }
     else if (index >= (uint16_t)UnusedSection_Start && index < (uint16_t)PaletteRAMIndeces_Start) {
         index -= 0x1000;
+    }
+
+    if (CurROM->MapperNumber != (uint16_t)Map_AxROM) {
+        if (!CurROM->HasAltNTL) {
+            if (CurROM->Layout == NTL_Vertical) {
+                if ((index >= 0x2000U && index < 0x2400U) || (index >= 0x2800U && index < 0x2C00U)) {
+                    return PPUMemory[index + 0x0400U];
+                }
+            }
+            else if (CurROM->Layout == NTL_Horizontal) {
+                if ((index >= 0x2000U && index < 0x2400U) || (index >= 0x2400U && index < 0x2800U)) {
+                    return PPUMemory[index + 0x0800U];
+                }
+            }
+        }
+    }
+    else {
+        if (index >= 0x2000U && index < 0x2400U) {
+            if (PPUAXNTSelect == 1) {
+                return PPUAXMem[index - 0x2000U];
+            }
+        }
+        else if (index >= 0x2000U && index < 0x3F00) {
+            if (PPUAXNTSelect == 1) {
+                return PPUAXMem[(index - 0x2000U) % 0x0400U];
+            }
+        }
     }
 
     return PPUMemory[index];
@@ -208,26 +324,6 @@ uint8_t* PPUGetAddr(uint16_t index) {
     }
 
     return &PPUMemory[index];
-}
-
-
-void PPUInit() {
-    CurPPU = malloc(sizeof(PPU));
-    PPUMemory = calloc(1, 0x4000U);
-
-    CurPPU->RegV = 0;
-    CurPPU->RegT = 0;
-    CurPPU->RegX = 0;
-    CurPPU->RegW = 0;
-
-    CurPPU->PPUCTRL = &CPUMemory[PPU_PPUCTRL];
-    CurPPU->PPUMASK = &CPUMemory[PPU_PPUMASK];
-    CurPPU->PPUSTATUS = &CPUMemory[PPU_PPUSTATUS];
-    CurPPU->OAMADDR = &CPUMemory[PPU_OAMADDR];
-    CurPPU->OAMDATA = &CPUMemory[PPU_OAMDATA];
-    CurPPU->PPUSCROLL = &CPUMemory[PPU_PPUSCROLL];
-    CurPPU->PPUADDR = &CPUMemory[PPU_PPUADDR];
-    CurPPU->PPUDATA = &CPUMemory[PPU_PPUDATA];
 }
 
 uint16_t GetBaseNameTableAddress() {
@@ -348,6 +444,7 @@ void OnWriteToPPUADDR() {
     if (!CurPPU->RegW) { // Write high byte
         //printf("Writing high byte\n");
         highByte = *CurPPU->PPUADDR;
+        highByte &= 0b00111111;
         lowByte = GetLowByte(CurPPU->RegT);
 
         newValue = AssembleAbsoluteAddress(lowByte, highByte);
@@ -365,35 +462,13 @@ void OnWriteToPPUADDR() {
         PPUSetW(0U);
     }
 
-    //printf("High: %02X, Low: %02X, New: %04X\n", highByte, lowByte, newValue);
+    //printf("High: %02X, Low: %02X, V: %04X\n", highByte, lowByte, CurPPU->RegV);
 
     RunPPU(CPUTimeStamp);
 }
 
 void OnWriteToPPUDATA() {
     PPUWrite(CurPPU->RegV, CurPPU->DataBus);
-
-    /*
-    if (CurScanline > 0 && CurScanline < 240) {
-        if (CheckBit(*CurPPU->PPUMASK, PPUMASK_EnableBGRendering)) {
-            if ((CurPPU->RegV & 0x1F) == 31) {
-                CurPPU->RegV &= ~0x1F;
-                CurPPU->RegV ^= 0x0400;
-            }
-            else {
-                CurPPU->RegV += 1;
-            }
-        }
-    }
-    else {
-        if (!CheckBit(*CurPPU->PPUCTRL, PPUCTRL_VRAMIncrement)) {
-            PPUSetV(CurPPU->RegV + 1U);
-        }
-        else {
-            PPUSetV(CurPPU->RegV + 32U);
-        }
-    }
-    */
 
     if (!CheckBit(*CurPPU->PPUCTRL, PPUCTRL_VRAMIncrement)) {
         PPUSetV(CurPPU->RegV + 1U);
@@ -463,6 +538,10 @@ void DumpPPU() {
     fprintf(dumpFile, "\nOAM\n");
     DumpOAM(dumpFile);
 
+    if (PPUAXMem) {
+        DumpAXMem(dumpFile);
+    }
+
     fclose(dumpFile);
 }
 
@@ -507,4 +586,28 @@ void DumpOAM(FILE* file) {
     }
     
     fprintf(file, "\n");
+}
+
+void DumpAXMem(FILE* file) {
+    uint8_t bufitoa[16];
+    uint8_t addr = 0x00;
+
+    for (size_t i = 0; i < 256; i++) {
+        fprintf(file, "%04s: ", itoa(addr, bufitoa, 16));
+
+        for (size_t j = 0; j < 16; j++) {
+            if (j == 15) {
+                fprintf(file, "%02hhX", PPUAXMem[addr + j]);
+            }
+            else {
+                fprintf(file, "%02hhX ", PPUAXMem[addr + j]);
+            }
+        }
+
+        fprintf(file, "\n");
+        addr += 0x10;
+    }
+
+    fprintf(file, "\n");
+    addr += 0x10;
 }

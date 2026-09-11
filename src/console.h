@@ -59,7 +59,7 @@ typedef struct EmuState {
 #define NumCPUCycles_NTSC       (NumDots_NTSC / 3) // Number of CPU cycles available per frame
 
 #define NumDots_PAL             (Scanline_Length * Scanlines_PAL) // Number of dots per frame
-#define NumCPUCycles_PAL        (NumDots_PAL / 3) // Number of CPU cycles available per frame
+#define NumCPUCycles_PAL        (NumDots_PAL / 3.2f) // Number of CPU cycles available per frame
 
 #define CPUCycleDivider_NTSC     15
 #define CPUCycleDivider_PAL      16
@@ -105,8 +105,10 @@ void SetupConsole();
 void ResetFrameCount();
 void UseCPUCycles(uint8_t amount);
 void UsePPUCycles(uint8_t amount);
+void TriggerBankSwitch(uint16_t addr, uint8_t value);
 
 uint8_t IsVisibleOnScanline(uint8_t scanline, uint8_t topY);
+bool IsRenderingEnabled();
 
 // Execute until timestamp is reached
 void RunCPU(uint32_t timestamp);
@@ -117,6 +119,7 @@ void DrawBGPixel(uint8_t x, uint8_t y);
 void DrawBGPixelV(uint8_t x, uint8_t y);
 void GetValidSPR(SpriteData* sprites);
 void DrawSPRLayer();
+void ProcessSPR0(SpriteData* spr);
 void DrawSPR(SpriteData* spr);
 
 void WriteStateLog(uint8_t inst);

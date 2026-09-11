@@ -62,24 +62,20 @@ void SetupConsole() {
 }
 
 void ResetFrameCount() {
-    // FIXME: This shouldn't fully reset, but not sure of exact numbers to deduct yet
-    // Addendum: Even fixing the scanline count, this still leads to a grey screen
+    if (System == SYS_NTSC) {
+        CPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
+        CPUCycleCount -= NumCPUCycles_NTSC;
 
-    //const uint32_t tempc1 = (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
-    //const uint32_t tempc2 = NumCPUCycles_NTSC;
-    //printf("CPU T: %u, -%u\nCPU C: %u, -%u\n", CPUTimeStamp, temp1, CPUCycleCount, temp2);
+        PPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
+        PPUCycleCount -= (NumCPUCycles_NTSC * (CPUCycleDivider_NTSC / PPUCycleDivider));
+    }
+    else if (System == SYS_PAL) {
+        CPUTimeStamp -= (NumCPUCycles_PAL * CPUCycleDivider_PAL);
+        CPUCycleCount -= NumCPUCycles_PAL;
 
-    CPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
-    CPUCycleCount -= NumCPUCycles_NTSC;
-
-    //CPUTimeStamp = 0;
-    //CPUCycleCount = 0;
-
-    PPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
-    PPUCycleCount -= (NumCPUCycles_NTSC * (CPUCycleDivider_NTSC / PPUCycleDivider));
-
-    //PPUTimeStamp = 0;
-    //PPUCycleCount = 0;
+        PPUTimeStamp -= (NumCPUCycles_PAL * CPUCycleDivider_PAL);
+        PPUCycleCount -= (NumCPUCycles_PAL * (CPUCycleDivider_PAL / PPUCycleDivider));
+    }
 }
 
 void UseCPUCycles(uint8_t amount) {
@@ -114,17 +110,30 @@ uint8_t IsVisibleOnScanline(uint8_t scanline, uint8_t topY) {
     }  
 }
 
+bool IsRenderingEnabled() {
+    if (!BGRenderingEnabled && !SPRRenderingEnabled) {
+        return false;
+    }
+    
+    return true;
+}
+
+void TriggerBankSwitch(uint16_t addr, uint8_t value) {
+    if (CurROM->MapperNumber == (uint16_t)Map_AxROM) {
+        uint8_t bankNum = value & 0b111;
+        size_t offset = (0x8000U * bankNum);
+        memcpy(&CPUMemory[ROM_Start], &ROM_PRG[offset], 0x8000U);
+
+        uint8_t ntNum = (value >> 4) & 1;
+        PPUAXSwapNT(ntNum);
+    }
+}
+
 void RunCPU(uint32_t timestamp) {
     //printf("CPU timestamp: %u\n", timestamp);
     if (CPUTimeStamp >= timestamp) {
         return;
     }
-
-    /*
-    uint8_t inc = 0;
-    uint8_t recentOpcode[3];
-    uint8_t recentCount[3];
-    */
 
     while (CPUTimeStamp < timestamp && !StopExecution) {
         if (!NMIOccured && QueueNMI) {
@@ -133,23 +142,19 @@ void RunCPU(uint32_t timestamp) {
             TriggerNMI();
         }
 
-        
-
-        IsExecutingInstruction = 1;
         uint8_t instruction = ReadProgramByte();
         WriteStateLog(instruction);
         //printf("Addr: %04X, Instruction: %02X.    Next two bytes: %02X, %02X.    A: %02X, X: %02X, Y: %02X, Status: %02X\n", CCPU->PC - 1, instruction, CPUMemory[CCPU->PC], CPUMemory[CCPU->PC + 1], CCPU->Accumulator, CCPU->RegX, CCPU->RegY, CCPU->Status);
 
         /*
-        if (CCPU->PC - 1 >= 0xF207 && CCPU->PC - 1 <= 0xF23C) {
-            printf("Addr: %04X, Instruction: %02X.    Next two bytes: %02X, %02X.    A: %02X, X: %02X, Y: %02X, Status: %02X\n", CCPU->PC - 1, instruction, CPUMemory[CCPU->PC], CPUMemory[CCPU->PC + 1], CCPU->Accumulator, CCPU->RegX, CCPU->RegY, CCPU->Status);
+        if (CCPU->PC - 1 >= 0xCB57 && CCPU->PC - 1 <= 0xCB76) {
+            printf("Addr: %04X, Instruction: %02X.    Next two bytes: %02X, %02X.    A: %02X, X: %02X, Y: %02X, Status: %02X. V: %04X\n", CCPU->PC - 1, instruction, CPUMemory[CCPU->PC], CPUMemory[CCPU->PC + 1], CCPU->Accumulator, CCPU->RegX, CCPU->RegY, CCPU->Status, CurPPU->RegV);
             //printf("A: %02X, X: %02X, Y: %02X, Status: %02X\n", CCPU->Accumulator, CCPU->RegX, CCPU->RegY, CCPU->Status);
         }
         */
         
         ExecuteInstruction(instruction);
         RunPPU(CPUTimeStamp);
-        IsExecutingInstruction = 0;
     }
 }
 
@@ -181,12 +186,12 @@ void RunPPU(uint32_t timestamp) {
                 OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_VBlank, 0);
                 OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_Sprite0Hit, 0);
             }
-            else if (CurDot >= 280 && CurDot < 305) {
+            else if (CurDot >= 280 && CurDot < 305 && IsRenderingEnabled()) {
                 uint16_t v = CurPPU->RegV;
                 uint16_t t = CurPPU->RegT;
 
-                v &= 0b000010000011111;
-                t &= 0b111101111100000;
+                v &= 0b0000010000011111;
+                t &= 0b0111101111100000;
 
                 v |= t;
 
@@ -219,30 +224,32 @@ void RunPPU(uint32_t timestamp) {
             DrawSPRLayer();
         }
 
-        //if (CurDot % 8 == 0 && (CurDot >= 328 || CurDot <= 256)) {
-        if (CurDot != 0 && CurDot % 8 == 0 && CurDot <= 256) {
-            if (BGRenderingEnabled) {
-                PPUIncCoarseX();
+        if (CurScanline < 240) {
+            if (CurDot == 256) {
+                if (IsRenderingEnabled()) {
+                    PPUIncFineY();
+                }
             }
-        }
 
-        if (CurDot == 256) {
-            if (BGRenderingEnabled) {
-                PPUIncFineY();
+            //if (CurDot != 0 && CurDot % 8 == 0 && (CurDot <= 256 || CurDot >= 328)) {
+            if (CurDot != 0 && CurDot % 8 == 0 && CurDot <= 256) {
+                if (IsRenderingEnabled()) {
+                    PPUIncCoarseX();
+                }
             }
-        }
-        else if (CurDot == 257) {
-            if (BGRenderingEnabled) {
-                uint16_t temp = CurPPU->RegV;
-                OverrideBit16(&temp, 10, CheckBit(GetHighByte(CurPPU->RegT), 2));
-                temp >>= 5;
-                temp <<= 5;
 
-                uint16_t other = 0b00011111 & CurPPU->RegT;
-                temp += other;
+            if (CurDot == 257) {
+                if (IsRenderingEnabled()) {
+                    uint16_t temp = CurPPU->RegV;
+                    OverrideBit16(&temp, 10, CheckBit(GetHighByte(CurPPU->RegT), 2));
+                    temp >>= 5;
+                    temp <<= 5;
 
-                CurPPU->RegV = temp;
-                //CurPPU->RegV = CurPPU->RegT;
+                    uint16_t other = 0b00011111 & CurPPU->RegT;
+                    temp += other;
+
+                    CurPPU->RegV = temp;
+                }
             }
         }
 
@@ -253,7 +260,10 @@ void RunPPU(uint32_t timestamp) {
             CurDot -= Scanline_Length;
             CurScanline++;
 
-            if (CurScanline == 261) {
+            if (System == SYS_NTSC && CurScanline == (Scanlines_NTSC - 1)) {
+                CurScanline = -1;
+            }
+            else if (System == SYS_PAL && CurScanline == (Scanlines_PAL - 1)) {
                 CurScanline = -1;
             }
         }
@@ -361,103 +371,23 @@ void RunPPU(uint32_t timestamp) {
     */
 }
 
-void DrawBGLayer() {
-    // Cheating a bit
-    const uint16_t ntBaseAddr = GetBaseNameTableAddress();
-    const uint16_t coarseX = (uint16_t)0b0000000000011111 & CurPPU->RegV;
-
-    for (size_t row = 0; row < 240; row++) {
-        for (size_t col = 0; col < 256; col++) {
-            //const uint16_t tileNum = ((row / 8) * 32) + (col / 8);
-            const uint16_t tileNum = ((row / 8) * 32) + ((col + CurPPU->RegX % 8) / 8);
-            
-            const uint16_t natAddr = ntBaseAddr + tileNum;
-            //const uint16_t natAddr = (ntBaseAddr + tileNum) + (0x40U * ((ntBaseAddr + tileNum) % 0x2000U) / 0x03C0);
-            uint16_t scrAddr = natAddr + CurPPU->RegX / 8 + coarseX;
-            
-            // If nametable is crossed OR hitting a transfer tile past the middle of the screen
-            if (((natAddr & 0xFFE0) != (scrAddr & 0xFFE0)) || ((col > 128) && ((tileNum % 32) == 0))) {
-                scrAddr ^= 0x0400U;
-                scrAddr -= 0x20U;
-            }
-
-            const uint16_t tileID = PPURead(scrAddr);
-            const uint16_t bgTileAddr = GetBaseBGPatternTableAddress() + (tileID * 0x10) + (row % 8);
-            //const uint16_t tileAttr = PPURead(((natTileAddr) & 0xFC00) + 0x03C0 + ((row / 32) * 8) + (col / 32));
-            const uint16_t tileAttr = GetAttribute(scrAddr);
-            //const uint16_t attrShift = (((tileNum % 32) / 2 % 2) + (tileNum / 64 % 2) * 2) * 2;
-            const uint16_t attrShift = GetAttributeTilePart(scrAddr);
-            const uint16_t paletteOffset = ((tileAttr >> attrShift) & 0x3) * 4;
-            //const uint8_t pixel = ((PPURead(bgTileAddr) >> (7 - (col % 8))) & 1) + (((PPURead(bgTileAddr + 8) >> (7 - (col % 8))) & 1) * 2);
-            const uint8_t pixel = ((PPURead(bgTileAddr) >> (7 - ((col + CurPPU->RegX % 8) % 8))) & 1) + (((PPURead(bgTileAddr + 8) >> (7 - ((col + CurPPU->RegX % 8) % 8))) & 1) * 2);
-
-            uint16_t paletteIndex = PaletteRAMIndeces_Start + paletteOffset + pixel;
-
-            // Might need some tweaking once sprites exist
-            if (paletteIndex % 4 == 0) {
-                paletteIndex = 0x3F00U;
-            }
-
-            BGFrameBuffer[(row * 256 * 3) + (col * 3)] = (Palette_NTSC[PPURead(paletteIndex)] >> 16) & 0xFF;
-            BGFrameBuffer[(row * 256 * 3) + (col * 3) + 1] = (Palette_NTSC[PPURead(paletteIndex)] >> 8) & 0xFF;
-            BGFrameBuffer[(row * 256 * 3) + (col * 3) + 2] = (Palette_NTSC[PPURead(paletteIndex)]) & 0xFF;
-        }
-    }
-}
-
-void DrawBGPixel(uint8_t x, uint8_t y) {
-    /*
-    Research results from Monday:
-        - MESEN is annoying and doesn't show 2000.0/2000.1
-        - There's a high possibility that scrolling and indexing relies entirely on V during rendering
-        - Because I don't use V for anything except Coarse X, I run into problems
-        - PPUCTRL is set to something else sometimes at the end of frame, and isn't reset
-        - V, however, is set to 0, which would imply no scrolling and using the first table
-        - Putting those elements together, it is likely V is what I should be using instead of the registers (and incomprehensible code) for scrolling and indexing
-        - Meaning that V is progressively built up as rendering happens, and writing to the registers is to primarily copy specific values into V
-        - Only problem is that V seems to always be 0 somehow??
-    */
-
-    const uint16_t ntBaseAddr = GetBaseNameTableAddress();
-    const uint16_t coarseX = (uint16_t)0b0000000000011111 & CurPPU->RegV;
-
-    const uint16_t tileNum = ((y / 8) * 32) + ((x + CurPPU->RegX % 8) / 8);
-    
-    const uint16_t natAddr = ntBaseAddr + tileNum;
-    uint16_t scrAddr = natAddr + CurPPU->RegX / 8 + coarseX;
-    
-    // If nametable is crossed OR hitting a transfer tile past the middle of the screen
-    if (((natAddr & 0xFFE0) != (scrAddr & 0xFFE0)) || ((x > 128) && ((tileNum % 32) == 0))) {
-        scrAddr ^= 0x0400U;
-        scrAddr -= 0x20U;
-    }
-
-    const uint16_t tileID = PPURead(scrAddr);
-    const uint16_t bgTileAddr = GetBaseBGPatternTableAddress() + (tileID * 0x10) + (y % 8);
-    const uint16_t tileAttr = GetAttribute(scrAddr);
-    const uint16_t attrShift = GetAttributeTilePart(scrAddr);
-    const uint16_t paletteOffset = ((tileAttr >> attrShift) & 0x3) * 4;
-    const uint8_t pixel = ((PPURead(bgTileAddr) >> (7 - ((x + CurPPU->RegX % 8) % 8))) & 1) + (((PPURead(bgTileAddr + 8) >> (7 - ((x + CurPPU->RegX % 8) % 8))) & 1) * 2);
-
-    uint16_t paletteIndex = PaletteRAMIndeces_Start + paletteOffset + pixel;
-
-    // Might need some tweaking once sprites exist
-    if (paletteIndex % 4 == 0) {
-        paletteIndex = 0x3F00U;
-    }
-
-    BGFrameBuffer[(y * 256 * 3) + (x * 3)] = (Palette_NTSC[PPURead(paletteIndex)] >> 16) & 0xFF;
-    BGFrameBuffer[(y * 256 * 3) + (x * 3) + 1] = (Palette_NTSC[PPURead(paletteIndex)] >> 8) & 0xFF;
-    BGFrameBuffer[(y * 256 * 3) + (x * 3) + 2] = (Palette_NTSC[PPURead(paletteIndex)]) & 0xFF;
-}
-
 void DrawBGPixelV(uint8_t x, uint8_t y) {
+    if (x < 8 && !CheckBit(*CurPPU->PPUMASK, 1)) {
+        BGFrameBuffer[(y * 256 * 3) + (x * 3)] = (Palette_NTSC[PPURead(0x3F00U)] >> 16) & 0xFF;
+        BGFrameBuffer[(y * 256 * 3) + (x * 3) + 1] = (Palette_NTSC[PPURead(0x3F00U)] >> 8) & 0xFF;
+        BGFrameBuffer[(y * 256 * 3) + (x * 3) + 2] = (Palette_NTSC[PPURead(0x3F00U)]) & 0xFF;
+        return;
+    }
+
     // How many tiles we're offset in either direction
     const uint8_t coarseX = (uint8_t)(CurPPU->RegV & 0b11111);
-    const uint8_t coarseY = (uint8_t)((CurPPU->RegV & 0b1111100000) >> 5);
+    const uint8_t coarseY = (uint8_t)((CurPPU->RegV >> 5) & 0b11111);
+    const uint8_t fineY = (uint8_t)((CurPPU->RegV >> 12) & 0b111);
 
     // Are we scrolling partially through a tile on the X-axis? (called crossing here)
     bool crossingX = ((x & 7) + CurPPU->RegX) > 7;
+    //bool crossingY = ((y & 7) + fineY) > 7;
+    bool crossingY = false;
 
     uint16_t tileAddr;
     uint16_t attrAddr;
@@ -468,6 +398,13 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
         tileAddr = GetOffsetTileAddress(simV);
         attrAddr = GetOffsetAttributeAddress(simV);
     }
+    /*
+    else if (crossingY) {
+        const uint16_t simV = SimulateIncCoarseY();
+        tileAddr = GetOffsetTileAddress(simV);
+        attrAddr = GetOffsetAttributeAddress(simV);
+    }
+    */
     else {
         tileAddr = GetTileAddress();
         attrAddr = GetAttributeAddress();
@@ -476,10 +413,10 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
     const uint8_t tileVal = PPURead(tileAddr);
     const uint8_t attrVal = PPURead(attrAddr);
 
-    const uint16_t patternAddr = GetBaseBGPatternTableAddress() + (tileVal * 0x10) + (y % 8);
+    const uint16_t patternAddr = GetBaseBGPatternTableAddress() + (tileVal * 0x10) + (fineY % 8); // Changed y to fineY for Ice Climber
 
     uint8_t attrRegX;
-    const uint8_t attrRegY = coarseY & 2 ? 1 : 0;
+    uint8_t attrRegY;
 
     // Also grab the appropriate attribute if crossing
     if (crossingX) {
@@ -488,6 +425,17 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
     else {
         attrRegX = coarseX & 2 ? 1 : 0;
     }
+
+    
+    if (crossingY) {
+        attrRegY = (coarseY + 1) & 2 ? 1 : 0;
+    }
+    else {
+        attrRegY = coarseY & 2 ? 1 : 0;
+    }
+    
+
+    //attrRegY = coarseY & 2 ? 1 : 0;
 
     // Which quadrant is the pixel in? 0 = top left, 1 = top right, 2 = bottom left, 3 = bottom right
     const uint8_t attrIndex = attrRegX + (attrRegY * 2);
@@ -519,6 +467,13 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
     const uint8_t pixel = ((PPURead(patternAddr) >> (7 - ((x + CurPPU->RegX % 8) % 8))) & 1) + (((PPURead(patternAddr + 8) >> (7 - ((x + CurPPU->RegX % 8) % 8))) & 1) * 2);
 
     uint16_t paletteIndex = PaletteRAMIndeces_Start + (attrPartIndex * 4) + pixel;
+
+    /*
+    if (x > 235 && x % 4 == 0 && y > 206 && y < 226) {
+        printf("X: %02u, Y: %03u, FX: %u, V: %04X, TA: %04X, TV: %02X, AA: %04X, AV: %02X, PA: %04X. CY: %02u, FY: %02u\n", x, y, CurPPU->RegX, CurPPU->RegV, tileAddr, tileVal, attrAddr, attrVal, patternAddr, coarseY, fineY);
+        printf("Pixel: %u, AI: %02X, PI: %02X\n", pixel, attrIndex, attrPartIndex);
+    }
+    */
 
     // Needs some tweaks to work with sprite priority
     if (paletteIndex % 4 == 0) {
@@ -576,6 +531,10 @@ void DrawSPRLayer() {
     }
 }
 
+void ProcessSPR0(SpriteData* spr) {
+    
+}
+
 void DrawSPR(SpriteData* spr) {
     // FIXME: Temporary routine to skip drawing low priority sprites - find solution later
     /*
@@ -629,6 +588,18 @@ void DrawSPR(SpriteData* spr) {
                 spriteXOverflow = (spr->PositionX + 7) - col;
             }
 
+            // If pixel would be drawn out of bounds to the right (onto the next scanline from the left), don't, and try the next pixel
+            // If flipped horizontally, valid pixels might occur in a later loop (drawing right to left), so continue instead of break
+            if (spriteXOverflow > 0xFFU) {
+                continue;
+            }
+
+            spriteX = (uint8_t)spriteXOverflow;
+
+            if (spriteX < 8 && !CheckBit(*CurPPU->PPUMASK, 2)) {
+                continue;
+            }
+
             if (!flipV) {
                 spriteY = actualPosY + row;
             }
@@ -641,14 +612,6 @@ void DrawSPR(SpriteData* spr) {
             if (spriteY > 0xEFU) {
                 break;
             }
-
-            // If pixel would be drawn out of bounds to the right (onto the next scanline from the left), don't, and try the next pixel
-            // If flipped horizontally, valid pixels might occur in a later loop (drawing right to left), so continue instead of break
-            if (spriteXOverflow > 0xFFU) {
-                continue;
-            }
-
-            spriteX = (uint8_t)spriteXOverflow;
 
             bufferIndex = (spriteY * 256 * 4) + (spriteX * 4);
 

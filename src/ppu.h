@@ -89,6 +89,13 @@ typedef struct PPU {
     uint8_t SecOAM[32];
 } PPU;
 
+typedef struct Sprite0Data {
+    uint8_t x;
+	uint8_t y;
+	bool HasHit;
+	uint8_t PixelData[64];
+} Sprite0Data;
+
 /* Register values
 
 PPUCTRL
@@ -187,6 +194,9 @@ DDDD DDDD
 extern PPU* CurPPU;
 extern uint8_t* PPUMemory;
 
+extern uint8_t PPUAXNTSelect;
+extern uint8_t* PPUAXMem;
+
 extern uint32_t Palette_NTSC[64];
 extern uint32_t Palette_NTSC_old[64];
 
@@ -195,6 +205,8 @@ extern int8_t SPRRenderFlagCountdown;
 
 extern uint8_t PendingBGRenderFlag;
 extern uint8_t PendingSPRRenderFlag;
+
+extern Sprite0Data SPR0Data;
 
 extern bool BGRenderingEnabled;
 extern bool SPRRenderingEnabled;
@@ -206,6 +218,7 @@ void PPUSetW(uint8_t value);
 
 void PPUIncCoarseX();
 uint16_t SimulateIncCoarseX();
+uint16_t SimulateIncCoarseY();
 void PPUIncFineY();
 
 uint16_t GetTileAddress();
@@ -213,11 +226,14 @@ uint16_t GetOffsetTileAddress(uint16_t simV);
 uint16_t GetAttributeAddress();
 uint16_t GetOffsetAttributeAddress(uint16_t simV);
 
+void PPUAXSwapNT(uint8_t num);
+
 void PPUWrite(uint16_t index, uint8_t value);
 uint8_t PPURead(uint16_t index);
 uint8_t* PPUGetAddr(uint16_t index);
 
 void PPUInit();
+void PPUPostInit();
 
 uint16_t GetBaseSPRPatternTableAddress();
 uint16_t GetBaseBGPatternTableAddress();
@@ -239,5 +255,6 @@ void OnWriteToOAMDATA();
 void DumpPPU();
 void DumpPPUWriteLine(FILE* file, uint16_t startAddr);
 void DumpOAM(FILE* file);
+void DumpAXMem(FILE* file);
 
 #endif

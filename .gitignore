@@ -5,6 +5,9 @@
 *.txt
 *.zip
 *.7z
+*.rc
+*.res
+*.ico
 
 # Prerequisites
 *.d

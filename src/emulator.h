@@ -18,7 +18,8 @@ extern SDL_Texture* SPRTexture;
 
 extern uint64_t NextFrameTime;
 
-extern FILE* file;
+extern FILE* ROMFile;
+
 extern uint8_t ROMLoaded;
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]);

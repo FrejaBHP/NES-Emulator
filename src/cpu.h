@@ -97,8 +97,6 @@ extern uint8_t* CPUMemory;
 extern uint8_t JOY0Latch;
 extern uint8_t JOY1Latch;
 
-extern uint8_t IsExecutingInstruction;
-
 void CPUInit();
 
 void DumpMemory();

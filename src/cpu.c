@@ -38,8 +38,6 @@ uint8_t* CPUMemory = NULL;
 uint8_t JOY0Latch = 0;
 uint8_t JOY1Latch = 0;
 
-uint8_t IsExecutingInstruction = 0;
-
 void CPUInit() {
     CCPU = calloc(1, sizeof(CPU));
     CPUMemory = calloc(1, 0xFFFF + 1);
@@ -82,11 +80,26 @@ void DumpMemory() {
     offset = 0x2000U;
     DumpWriteLineHalf(dumpFile, offset);
 
-    fprintf(dumpFile, "\nTest write region?\n");
-    offset = 0x6000U;
+    fprintf(dumpFile, "\nRest of Memory\n");
+    offset = 0x4020U;
+    while (true) {
+        if (offset % 0x1000 == 0) {
+            fprintf(dumpFile, "\n");
+        }
+
+        DumpWriteLine(dumpFile, offset);
+        offset += 0x10U;
+
+        if (offset < 0x4000U) {
+            break;
+        }
+    }
+    
+    /*
     for (size_t i = 0; i < 64; i++) {
         DumpWriteLine(dumpFile, offset + (uint16_t)i * 16);
     }
+    */
     
     fclose(dumpFile);
 }
@@ -422,7 +435,11 @@ void StoreAbsolute(uint16_t index, const uint8_t value) {
     else if ((uint16_t)APU_Start > index && index > (uint16_t)PPU_Start) {
         index = (index % (uint16_t)PPU_Size) + (uint16_t)PPU_Start;
     }
-    else if (index > (uint16_t)ROM_Start) {
+    else if (index >= (uint16_t)ROM_Start) {
+        if (index <= 0xFFFFU && CurROM->MapperNumber != 0) {
+            CCPU->DataBus = value;
+            TriggerBankSwitch(index, value);
+        }
         return;
     }
 

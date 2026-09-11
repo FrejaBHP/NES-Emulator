@@ -96,7 +96,7 @@ void APUInit() {
     Stream = SDL_CreateAudioStream(&aspec, NULL);
     SDL_BindAudioStream(AudioDevice, Stream);
 
-    SoundBuffer = calloc(1, sizeof(int16_t) * 800);
+    SoundBuffer = calloc(1, sizeof(int16_t) * 1024);
 
     if (System == SYS_NTSC) {
         IgnoreCounterF = APUSampleDivider_NTSC;
@@ -123,7 +123,7 @@ void ClockAPU() {
     TickNoise();
     TickFC();
 
-    if (IgnoreCounter == 0 && SampleCounter < 800) {
+    if (IgnoreCounter == 0 && SampleCounter < 1024) {
         OutputPulse();
         OutputTriangle();
         OutputNoise();

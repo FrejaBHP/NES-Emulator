@@ -13,7 +13,7 @@ SDL_Texture* SPRTexture = NULL;
 int DesiredFrameTime;
 uint64_t NextFrameTime = 0;
 
-FILE* file = NULL;
+FILE* ROMFile = NULL;
 
 uint8_t ROMLoaded = 0;
 
@@ -47,12 +47,23 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    // Calculates the amount of time a frame should ideally take in nanoseconds to sustain the set framerate
-	DesiredFrameTime = 1000000000 / DesiredFrameRateNTSC;
-
-    NextFrameTime = SDL_GetTicksNS();
+    /*
+    SDL_Surface* icon = SDL_LoadSurface("nesderg2.bmp");
+    SDL_SetWindowIcon(Window, icon);
+    SDL_DestroySurface(icon);
+    */
 
     EmulatorStart();
+
+    // Calculates the amount of time a frame should ideally take in nanoseconds to sustain the set framerate
+    if (System == SYS_NTSC) {
+        DesiredFrameTime = 1000000000 / DesiredFrameRateNTSC;
+    }
+    else {
+        DesiredFrameTime = 1000000000 / DesiredFrameRatePAL;
+    }
+
+    NextFrameTime = SDL_GetTicksNS();
 
     return SDL_APP_CONTINUE;  /* carry on with the program! */
 }
@@ -200,15 +211,6 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
         SDL_Log("Can't render present: %s", SDL_GetError());
     }
 
-    /*
-    if (!AlternateFrame) {
-        SDL_PutAudioStreamData(ST_SQ[0].Stream, SQ0SoundBuffer, SampleCounter * 2);
-    }
-    else {
-        SDL_PutAudioStreamData(ST_SQ[0].Stream, SQ1SoundBuffer, SampleCounter * 2);
-    }
-    */
-
     SDL_PutAudioStreamData(Stream, SoundBuffer, SampleCounter * 2);
 
     AlternateFrame = !AlternateFrame;
@@ -255,6 +257,7 @@ void HandleNESInput() {
 void EmulatorStart() {
     Initialisation();
     LoadROM();
+    PPUPostInit();
     SetupConsole();
 }
 
@@ -267,8 +270,10 @@ void Initialisation() {
 void LoadROM() {
     uint8_t headerBuffer[16] = { 0 };
 
-    file = fopen("Super Mario Bros. (World).nes", "rb");
-    fread(headerBuffer, 1, sizeof(headerBuffer), file);
+    char ROMname[] = "Battletoads (Europe).nes";
+
+    ROMFile = fopen(ROMname, "rb");
+    fread(headerBuffer, 1, sizeof(headerBuffer), ROMFile);
 
     if (!CurROM) {
         CurROM = malloc(sizeof(ROMData));
@@ -277,23 +282,73 @@ void LoadROM() {
     ParseHeader(headerBuffer);
 
     if (CurROM->IsINES) {
+        if (!ROM_PRG) {
+            if (CurROM->PRG_ROM_Size < 0x80000) {
+                ROM_PRG = malloc(CurROM->PRG_ROM_Size);
+                fread(ROM_PRG, 1, CurROM->PRG_ROM_Size, ROMFile);
+            }
+            else {
+                printf("PRGROM is fockin' massiv, bruv. Quitting.");
+                abort();
+            }
+        }
+        if (!ROM_CHR) {
+            if (CurROM->CHR_ROM_Size == 0 && CurROM->CHR_RAM_Size != 0) {
+                ROM_CHR = malloc(CurROM->CHR_RAM_Size);
+                fread(ROM_CHR, 1, CurROM->CHR_RAM_Size, ROMFile);
+            }
+            else if (CurROM->CHR_ROM_Size < 0x40000) {
+                ROM_CHR = malloc(CurROM->CHR_ROM_Size);
+                fread(ROM_CHR, 1, CurROM->CHR_ROM_Size, ROMFile);
+            }
+            else {
+                printf("CHRROM is fockin' massiv, bruv. Quitting.");
+                abort();
+            }
+        }
+
         if (CurROM->PRG_ROM_Size == 0x4000U) {
-            fread(&CPUMemory[ROM_Start + 0x4000U], 1, 0x4000U, file);
+            //fread(&CPUMemory[ROM_Start + 0x4000U], 1, 0x4000U, ROMFile);
+            memcpy(&CPUMemory[ROM_Start + 0x4000U], ROM_PRG, 0x4000U);
         }
         else if (CurROM->PRG_ROM_Size == 0x8000U) {
-            fread(&CPUMemory[ROM_Start], 1, 0x8000U, file);
+            //fread(&CPUMemory[ROM_Start], 1, 0x8000U, ROMFile);
+            memcpy(&CPUMemory[ROM_Start], ROM_PRG, 0x8000U);
+        }
+        else {
+            //fread(&CPUMemory[ROM_Start], 1, 0x8000U, ROMFile);
+            memcpy(&CPUMemory[ROM_Start], ROM_PRG, 0x8000U);
         }
 
         if (CurROM->CHR_ROM_Size == 0x2000U) {
-            fread(&PPUMemory[0], 1, 0x2000U, file);
+            memcpy(&PPUMemory[0], ROM_CHR, 0x2000U);
+            //fread(&PPUMemory[0], 1, 0x2000U, ROMFile);
+        }
+        else {
+            memcpy(&PPUMemory[0], ROM_CHR, 0x2000U);
+            //fread(&PPUMemory[0], 1, 0x2000U, ROMFile);
         }
 
         CCPU->PC = AssembleAbsoluteAddress(CPUMemory[0xFFFC], CPUMemory[0xFFFD]);
     }
 
-    fclose(file);
+    fclose(ROMFile);
 
     ROMLoaded = 1;
+
+    // Probably should bounds check this eventually, as a precaution
+    char appName[128] = "NESD  -  ";
+    ROMname[strlen(ROMname) - 4] = '\0';
+    strcat(appName, ROMname);
+
+    if (CurROM->TimingMode == TMode_RP2C07) {
+        strcat(appName, " [PAL]");
+    }
+    else {
+        strcat(appName, " [NTSC]");
+    }
+
+    SDL_SetWindowTitle(Window, appName);
 }
 
 void ParseHeader(uint8_t* header) {
@@ -313,11 +368,15 @@ void ParseHeader(uint8_t* header) {
 
         CurROM->PRG_ROM_Size = header[4] * 0x4000U;
         CurROM->CHR_ROM_Size = header[5] * 0x2000U;
+        uint8_t shiftCount = header[11] & 0b1111;
+        CurROM->CHR_RAM_Size = 64 << shiftCount;
 
         // 12 bits for mapper number, but only 255 valid mappers??
         //uint16_t mapperNumber = (header[6] >> 4) | ((header[7] >> 4) << 4) | ((header[8] >> 4) << 8);
         CurROM->MapperNumber = header[6] >> 4;
 
         CurROM->DefController = header[15];
+
+        printf("PRG_ROM Size: %uB, CHR_ROM Size: %uB, CHR_RAM Size: %uB\n", CurROM->PRG_ROM_Size, CurROM->CHR_ROM_Size, CurROM->CHR_RAM_Size);
     }
 }

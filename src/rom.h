@@ -28,22 +28,31 @@ typedef enum TimingMode {
     TMode_UA6538        // Dendy (??)
 } TimingMode;
 
+typedef enum MapperName {
+    Map_NROM = 0,
+    Map_MMC3 = 4,
+    Map_AxROM = 7
+} MapperName;
+
 typedef struct ROMData {
     ConsoleType ConsoleType;
     NametableLayout Layout;
     DefaultController DefController;
     TimingMode TimingMode;
-    uint8_t MapperNumber;
+    uint16_t MapperNumber;
     bool IsINES;
     bool IsNES2;
     bool HasBattery;
     bool HasAltNTL;
 
     uint16_t Trainer_Size;
-    uint16_t PRG_ROM_Size;
-    uint16_t CHR_ROM_Size;
+    uint32_t PRG_ROM_Size;
+    uint32_t CHR_ROM_Size;
+    uint32_t CHR_RAM_Size;
 } ROMData;
 
 extern ROMData* CurROM;
+extern uint8_t* ROM_PRG;
+extern uint8_t* ROM_CHR;
 
 #endif
