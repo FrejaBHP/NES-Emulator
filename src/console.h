@@ -52,18 +52,22 @@ typedef struct EmuState {
 #define VBlankScanlines_NTSC     20
 #define VBlankScanlines_PAL      70
 
+#define CPUCycleDivider_NTSC     15
+#define CPUCycleDivider_PAL      16
+#define PPUCycleDivider           5
+
+#define PPUFinalDivider_NTSC    (CPUCycleDivider_NTSC / PPUCycleDivider)
+#define PPUFinalDivider_PAL     ((float)CPUCycleDivider_PAL / (float)PPUCycleDivider)
+
 #define VBlankTime_NTSC         Scanline_Length * VBlankScanlines_NTSC * PPUCycleDivider
 #define VBlankTime_PAL          Scanline_Length * VBlankScanlines_PAL * PPUCycleDivider
 
 #define NumDots_NTSC            ((Scanline_Length * Scanlines_NTSC) - 0.5) // Number of dots per frame. Every odd rendering frame has -1 dot
-#define NumCPUCycles_NTSC       (NumDots_NTSC / 3) // Number of CPU cycles available per frame
+#define NumCPUCycles_NTSC       (NumDots_NTSC / (PPUFinalDivider_NTSC)) // Number of CPU cycles available per frame
 
 #define NumDots_PAL             (Scanline_Length * Scanlines_PAL) // Number of dots per frame
-#define NumCPUCycles_PAL        (NumDots_PAL / 3.2f) // Number of CPU cycles available per frame
+#define NumCPUCycles_PAL        (NumDots_PAL / (PPUFinalDivider_PAL)) // Number of CPU cycles available per frame
 
-#define CPUCycleDivider_NTSC     15
-#define CPUCycleDivider_PAL      16
-#define PPUCycleDivider           5
 
 extern SystemType System;
 
@@ -114,12 +118,11 @@ bool IsRenderingEnabled();
 void RunCPU(uint32_t timestamp);
 void RunPPU(uint32_t timestamp);
 
-void DrawBGLayer();
-void DrawBGPixel(uint8_t x, uint8_t y);
 void DrawBGPixelV(uint8_t x, uint8_t y);
+void CheckSPR0Hit(uint8_t x, uint8_t y);
 void GetValidSPR(SpriteData* sprites);
 void DrawSPRLayer();
-void ProcessSPR0(SpriteData* spr);
+void ProcessSPR0();
 void DrawSPR(SpriteData* spr);
 
 void WriteStateLog(uint8_t inst);

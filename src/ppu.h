@@ -90,8 +90,8 @@ typedef struct PPU {
 } PPU;
 
 typedef struct Sprite0Data {
-    uint8_t x;
-	uint8_t y;
+    uint16_t x;
+	uint16_t y;
 	bool HasHit;
 	uint8_t PixelData[64];
 } Sprite0Data;

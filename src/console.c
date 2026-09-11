@@ -67,14 +67,14 @@ void ResetFrameCount() {
         CPUCycleCount -= NumCPUCycles_NTSC;
 
         PPUTimeStamp -= (NumCPUCycles_NTSC * CPUCycleDivider_NTSC);
-        PPUCycleCount -= (NumCPUCycles_NTSC * (CPUCycleDivider_NTSC / PPUCycleDivider));
+        PPUCycleCount -= (NumCPUCycles_NTSC * (PPUFinalDivider_NTSC));
     }
     else if (System == SYS_PAL) {
         CPUTimeStamp -= (NumCPUCycles_PAL * CPUCycleDivider_PAL);
         CPUCycleCount -= NumCPUCycles_PAL;
 
         PPUTimeStamp -= (NumCPUCycles_PAL * CPUCycleDivider_PAL);
-        PPUCycleCount -= (NumCPUCycles_PAL * (CPUCycleDivider_PAL / PPUCycleDivider));
+        PPUCycleCount -= (NumCPUCycles_PAL * (PPUFinalDivider_PAL));
     }
 }
 
@@ -199,13 +199,19 @@ void RunPPU(uint32_t timestamp) {
             }
         }
 
+        if (CurScanline == 0 && CurDot == 0) {
+            ProcessSPR0();
+        }
+
         // Drawing loop
         if (CurScanline >= 0 && CurScanline <= 239) {
+            /*
             if (CurScanline == 30 && CurDot == 91) {
                 if (BGRenderingEnabled && SPRRenderingEnabled) {
                     OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_Sprite0Hit, 1);
                 }
             }
+            */
 
             if (CurDot != 0 && CurDot < 257) {
                 DrawBGPixelV((uint8_t)(CurDot - 1), (uint8_t)CurScanline);
@@ -483,6 +489,29 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
     BGFrameBuffer[(y * 256 * 3) + (x * 3)] = (Palette_NTSC[PPURead(paletteIndex)] >> 16) & 0xFF;
     BGFrameBuffer[(y * 256 * 3) + (x * 3) + 1] = (Palette_NTSC[PPURead(paletteIndex)] >> 8) & 0xFF;
     BGFrameBuffer[(y * 256 * 3) + (x * 3) + 2] = (Palette_NTSC[PPURead(paletteIndex)]) & 0xFF;
+
+    if (!SPR0Data.HasHit && pixel != 0) {
+        CheckSPR0Hit(x, y);
+    }
+}
+
+void CheckSPR0Hit(uint8_t x, uint8_t y) {
+    if (!BGRenderingEnabled || !SPRRenderingEnabled) {
+        return;
+    }
+
+    int16_t row = y;
+    row -= SPR0Data.y;
+
+    int16_t col = x;
+    col -= SPR0Data.x;
+
+    if (row < 8 && row >= 0 && col < 8 && col >= 0) {
+        if (SPR0Data.PixelData[(row * 8) + col] == 1) {
+            SPR0Data.HasHit = true;
+            OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_Sprite0Hit, 1);
+        }
+    }
 }
 
 // Don't use
@@ -521,18 +550,122 @@ void DrawSPRLayer() {
         return;
     }
 
-    SpriteData* spr = (SpriteData*)CurPPU->OAM;
+    SpriteData* spr = (SpriteData*)&CurPPU->OAM[252];
     
     for (size_t i = 0; i < 64; i++) {
         if (spr->PositionY < 0xEFU) {
             DrawSPR(spr);
         }
-        spr++;
+        spr--;
     }
 }
 
-void ProcessSPR0(SpriteData* spr) {
-    
+void ProcessSPR0() {
+    SpriteData* spr0 = (SpriteData*)CurPPU->OAM;
+
+    uint16_t ntBaseAddr;
+    const bool isBigSprite = CheckBit(*CurPPU->PPUCTRL, PPUCTRL_SpriteSize);
+
+    if (isBigSprite) {
+        ntBaseAddr = CheckBit(spr0->TileIndex, 0U);
+    }
+    else {
+        ntBaseAddr = GetBaseNameTableAddress();
+    }
+
+    const uint8_t actualPosY = spr0->PositionY + 1;
+
+    const uint16_t tileID = spr0->TileIndex;
+    const uint16_t sprTileAddr = GetBaseSPRPatternTableAddress() + (tileID * 0x10);
+    //const uint8_t paletteID = 0b00000011 & spr0->Attributes;
+    //const uint16_t paletteAddr = PaletteRAMIndeces_Start + ((paletteID + 4) * 4);
+
+    bool flipH = CheckBit(spr0->Attributes, SPRAttrPos_FlipH);
+    bool flipV = CheckBit(spr0->Attributes, SPRAttrPos_FlipV);
+
+    SPR0Data.x = spr0->PositionX;
+    SPR0Data.y = actualPosY;
+    SPR0Data.HasHit = false;
+
+    for (size_t row = 0; row < 8; row++) {
+        if ((actualPosY + row) > 0xEFU) {
+            break;
+        }
+
+        for (size_t col = 0; col < 8; col++) {
+            const uint16_t sprOffset = sprTileAddr + row;
+
+            // Pixel defines which colour value it should have from the palette, 0 - 3
+            const uint8_t pixel = ((PPURead(sprOffset) >> (7 - (col % 8))) & 1) + (((PPURead(sprOffset + 8) >> (7 - (col % 8))) & 1) * 2);
+            //const uint32_t paletteValue = Palette_NTSC[PPURead(paletteAddr + pixel)];
+
+            //uint32_t bufferIndex;
+            uint16_t spriteXOverflow; // To catch attempts at drawing at X > 255, value is stored in a 16-bit integer first
+            uint8_t spriteX; // Dot to draw the pixel on
+            uint8_t spriteY; // Scanline to draw the pixel on
+
+            uint8_t pixDataX = col;
+            uint8_t pixDataY = row;
+
+            if (!flipH) {
+                spriteXOverflow = spr0->PositionX + col;
+            }
+            else {
+                // If flipped, draw the sprite right to left
+                spriteXOverflow = (spr0->PositionX + 7) - col;
+                pixDataX = 7 - col;
+            }
+
+            // If pixel would be drawn out of bounds to the right (onto the next scanline from the left), don't, and try the next pixel
+            // If flipped horizontally, valid pixels might occur in a later loop (drawing right to left), so continue instead of break
+            if (spriteXOverflow > 0xFFU) {
+                SPR0Data.PixelData[(pixDataY * 8) + pixDataX] = 0;
+                continue;
+            }
+
+            spriteX = (uint8_t)spriteXOverflow;
+
+            if (spriteX < 8 && !CheckBit(*CurPPU->PPUMASK, 2)) {
+                SPR0Data.PixelData[(pixDataY * 8) + pixDataX] = 0;
+                continue;
+            }
+
+            if (!flipV) {
+                spriteY = actualPosY + row;
+            }
+            else {
+                // If flipped, draw the sprite upside down
+                spriteY = (actualPosY + 7) - row;
+                pixDataY = 7 - row;
+            }
+
+            // If pixel would be drawn below the screen, stop drawing
+            if (spriteY > 0xEFU) {
+                SPR0Data.PixelData[(pixDataY * 8) + pixDataX] = 0;
+                break;
+            }
+
+            //bufferIndex = (spriteY * 256 * 4) + (spriteX * 4);
+
+            /*
+            if (bufferIndex > (256*240*4)) {
+                printf("Scanline: %u, Index: %u, FlipH: %u, FlipV: %u\n", actualPosY + row, bufferIndex, flipH, flipV);
+            }
+            */
+
+            if (pixel) {
+                //SPRFrameBuffer[bufferIndex] = (paletteValue >> 16) & 0xFF;
+                //SPRFrameBuffer[bufferIndex + 1] = (paletteValue >> 8) & 0xFF;
+                //SPRFrameBuffer[bufferIndex + 2] = (paletteValue) & 0xFF;
+                //SPRFrameBuffer[bufferIndex + 3] = 0xFF;
+
+                SPR0Data.PixelData[(pixDataY * 8) + pixDataX] = 1;
+            }
+            else {
+                SPR0Data.PixelData[(pixDataY * 8) + pixDataX] = 0;
+            }
+        }
+    }
 }
 
 void DrawSPR(SpriteData* spr) {
