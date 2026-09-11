@@ -205,14 +205,6 @@ void RunPPU(uint32_t timestamp) {
 
         // Drawing loop
         if (CurScanline >= 0 && CurScanline <= 239) {
-            /*
-            if (CurScanline == 30 && CurDot == 91) {
-                if (BGRenderingEnabled && SPRRenderingEnabled) {
-                    OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_Sprite0Hit, 1);
-                }
-            }
-            */
-
             if (CurDot != 0 && CurDot < 257) {
                 DrawBGPixelV((uint8_t)(CurDot - 1), (uint8_t)CurScanline);
             }
@@ -274,111 +266,11 @@ void RunPPU(uint32_t timestamp) {
             }
         }
     }
-
-    /*
-    uint8_t OAMindex = 0;
-    uint8_t SecOAMindex = 0;
-    uint8_t readValue = 0;
-    uint8_t secOAMfull = 0;
-
-    uint8_t spriteWithinY = 0;
-    uint8_t spriteByteToCopy = 0;
-
-    // pre-render scanline
-    if (CurScanline == -1) {
-        // if dot == 1
-        OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_VBlank, 0);
-    }
-
-    // Visible scanlines
-    while (CurScanline < 240) {
-        // Drawing the active part of the screen
-        while (CurDot < 256) {
-            // fetch tiles
-            if (CurDot != 0) {
-
-            }
-
-            // Init SecOAM
-            if (CurDot != 0 && CurDot <= 64) {
-                if (CurDot % 2 == 0) {
-                    CurPPU->SecOAM[CurDot / 2] = 0xFF;
-                }
-            }
-            // Evaluate sprites for next scanline
-            else if (CurDot <= 256) {
-                // Even cycles, write
-                if (CurDot % 2 == 0) {
-                    if (SecOAMindex < 32) {
-                        CurPPU->SecOAM[SecOAMindex] = readValue;
-
-                        if (spriteWithinY) {
-                            SecOAMindex++;
-                            spriteByteToCopy++;
-
-                            if (spriteByteToCopy > 3) {
-                                spriteByteToCopy = 0;
-                                spriteWithinY = 0;
-                            }
-                        }
-                    }
-                    else {
-                        secOAMfull = 1;
-                    }
-                }
-                // Odd cycles, read and increment index
-                else if (CurDot % 2 == 1 || secOAMfull) {
-                    readValue = CurPPU->OAM[OAMindex];
-
-                    if (!spriteWithinY && IsVisibleOnScanline(CurScanline + 1, readValue)) {
-                        spriteWithinY = 1;
-                        OAMindex++;
-                    }
-                    else {
-                        OAMindex += 4;
-                    }
-                }
-            }
-
-            CurDot++;
-            UsePPUCycles(1U);
-
-            if (PPUTimeStamp >= timestamp) {
-                return;
-            }
-        }
-
-        // Drawing outside
-        while (CurDot < Scanline_Length - 1) {
-
-        }
-
-        CurDot = 0;
-        CurScanline++;
-    }
-
-    // post-render scanline
-    if (CurScanline == 240) {
-        CurScanline++;
-    }
-
-    while (CurScanline < Scanlines_NTSC - 1) {
-        if (CurScanline == 241) {
-            // If dot == 1
-            OverrideBit8(CurPPU->PPUSTATUS, PPUSTATUS_VBlank, 1);
-
-            if (CheckBit(*CurPPU->PPUCTRL, PPUCTRL_VBlankNMIEnable)) {
-                TriggerNMI();
-            }
-        }
-
-        CurScanline++;
-    }
-    */
 }
 
 void DrawBGPixelV(uint8_t x, uint8_t y) {
-    if (x < 8 && !CheckBit(*CurPPU->PPUMASK, 1)) {
+    // Are we masking the left-most 8 pixels or not drawing at all?
+    if ((x < 8 && !CheckBit(*CurPPU->PPUMASK, 1)) || !BGRenderingEnabled) {
         BGFrameBuffer[(y * 256 * 3) + (x * 3)] = (Palette_NTSC[PPURead(0x3F00U)] >> 16) & 0xFF;
         BGFrameBuffer[(y * 256 * 3) + (x * 3) + 1] = (Palette_NTSC[PPURead(0x3F00U)] >> 8) & 0xFF;
         BGFrameBuffer[(y * 256 * 3) + (x * 3) + 2] = (Palette_NTSC[PPURead(0x3F00U)]) & 0xFF;
@@ -392,8 +284,6 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
 
     // Are we scrolling partially through a tile on the X-axis? (called crossing here)
     bool crossingX = ((x & 7) + CurPPU->RegX) > 7;
-    //bool crossingY = ((y & 7) + fineY) > 7;
-    bool crossingY = false;
 
     uint16_t tileAddr;
     uint16_t attrAddr;
@@ -404,13 +294,6 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
         tileAddr = GetOffsetTileAddress(simV);
         attrAddr = GetOffsetAttributeAddress(simV);
     }
-    /*
-    else if (crossingY) {
-        const uint16_t simV = SimulateIncCoarseY();
-        tileAddr = GetOffsetTileAddress(simV);
-        attrAddr = GetOffsetAttributeAddress(simV);
-    }
-    */
     else {
         tileAddr = GetTileAddress();
         attrAddr = GetAttributeAddress();
@@ -422,7 +305,7 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
     const uint16_t patternAddr = GetBaseBGPatternTableAddress() + (tileVal * 0x10) + (fineY % 8); // Changed y to fineY for Ice Climber
 
     uint8_t attrRegX;
-    uint8_t attrRegY;
+    const uint8_t attrRegY = coarseY & 2 ? 1 : 0;
 
     // Also grab the appropriate attribute if crossing
     if (crossingX) {
@@ -432,20 +315,8 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
         attrRegX = coarseX & 2 ? 1 : 0;
     }
 
-    
-    if (crossingY) {
-        attrRegY = (coarseY + 1) & 2 ? 1 : 0;
-    }
-    else {
-        attrRegY = coarseY & 2 ? 1 : 0;
-    }
-    
-
-    //attrRegY = coarseY & 2 ? 1 : 0;
-
     // Which quadrant is the pixel in? 0 = top left, 1 = top right, 2 = bottom left, 3 = bottom right
     const uint8_t attrIndex = attrRegX + (attrRegY * 2);
-
     uint8_t attrPartIndex = 0;
 
     switch (attrIndex) {
@@ -560,6 +431,8 @@ void DrawSPRLayer() {
     }
 }
 
+// Routine copied from DrawSPR(), but with the drawing-related parts removed.
+// Exclusively examines the sprite pixel values to evaluate the background against later for detecting SPR0 hits
 void ProcessSPR0() {
     SpriteData* spr0 = (SpriteData*)CurPPU->OAM;
 
@@ -577,8 +450,6 @@ void ProcessSPR0() {
 
     const uint16_t tileID = spr0->TileIndex;
     const uint16_t sprTileAddr = GetBaseSPRPatternTableAddress() + (tileID * 0x10);
-    //const uint8_t paletteID = 0b00000011 & spr0->Attributes;
-    //const uint16_t paletteAddr = PaletteRAMIndeces_Start + ((paletteID + 4) * 4);
 
     bool flipH = CheckBit(spr0->Attributes, SPRAttrPos_FlipH);
     bool flipV = CheckBit(spr0->Attributes, SPRAttrPos_FlipV);
@@ -597,9 +468,7 @@ void ProcessSPR0() {
 
             // Pixel defines which colour value it should have from the palette, 0 - 3
             const uint8_t pixel = ((PPURead(sprOffset) >> (7 - (col % 8))) & 1) + (((PPURead(sprOffset + 8) >> (7 - (col % 8))) & 1) * 2);
-            //const uint32_t paletteValue = Palette_NTSC[PPURead(paletteAddr + pixel)];
 
-            //uint32_t bufferIndex;
             uint16_t spriteXOverflow; // To catch attempts at drawing at X > 255, value is stored in a 16-bit integer first
             uint8_t spriteX; // Dot to draw the pixel on
             uint8_t spriteY; // Scanline to draw the pixel on
@@ -645,20 +514,7 @@ void ProcessSPR0() {
                 break;
             }
 
-            //bufferIndex = (spriteY * 256 * 4) + (spriteX * 4);
-
-            /*
-            if (bufferIndex > (256*240*4)) {
-                printf("Scanline: %u, Index: %u, FlipH: %u, FlipV: %u\n", actualPosY + row, bufferIndex, flipH, flipV);
-            }
-            */
-
             if (pixel) {
-                //SPRFrameBuffer[bufferIndex] = (paletteValue >> 16) & 0xFF;
-                //SPRFrameBuffer[bufferIndex + 1] = (paletteValue >> 8) & 0xFF;
-                //SPRFrameBuffer[bufferIndex + 2] = (paletteValue) & 0xFF;
-                //SPRFrameBuffer[bufferIndex + 3] = 0xFF;
-
                 SPR0Data.PixelData[(pixDataY * 8) + pixDataX] = 1;
             }
             else {
