@@ -230,9 +230,9 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 
 /* This function runs once at shutdown. */
 void SDL_AppQuit(void* appstate, SDL_AppResult result) {
-    DumpMemory();
-    DumpPPU();
-    DumpStateLog((size_t)result);
+    //DumpMemory();
+    //DumpPPU();
+    //DumpStateLog((size_t)result);
 
     SDL_CloseAudioDevice(AudioDevice);
     SDL_DestroyAudioStream(Stream);
@@ -270,7 +270,7 @@ void Initialisation() {
 void LoadROM() {
     uint8_t headerBuffer[16] = { 0 };
 
-    char ROMname[] = "Battletoads (Europe).nes";
+    char ROMname[] = "Super Mario Bros. (World).nes";
 
     ROMFile = fopen(ROMname, "rb");
     fread(headerBuffer, 1, sizeof(headerBuffer), ROMFile);

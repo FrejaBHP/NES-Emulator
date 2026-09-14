@@ -87,6 +87,7 @@ extern uint32_t FrameCount;
 extern int16_t CurScanline;
 extern uint16_t CurDot;
 extern uint8_t* BGFrameBuffer;
+extern uint8_t* BGTransBuffer;
 extern uint8_t* SPRFrameBuffer;
 
 extern int16_t* SoundBuffer;

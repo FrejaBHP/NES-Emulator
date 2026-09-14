@@ -24,6 +24,7 @@ uint32_t FrameCount = 0;
 int16_t CurScanline = -1; // There's a pre-render scanline, noted here with -1
 uint16_t CurDot = 0;
 uint8_t* BGFrameBuffer = NULL;
+uint8_t* BGTransBuffer = NULL;
 uint8_t* SPRFrameBuffer = NULL;
 
 int16_t* SoundBuffer = NULL;
@@ -58,6 +59,7 @@ void SetupConsole() {
     }
 
     BGFrameBuffer = malloc(sizeof(uint8_t) * 256 * 240 * 3);
+    BGTransBuffer = malloc(sizeof(uint8_t) * 256 * 240);
     SPRFrameBuffer = malloc(sizeof(uint8_t) * 256 * 240 * 4);
 }
 
@@ -143,7 +145,7 @@ void RunCPU(uint32_t timestamp) {
         }
 
         uint8_t instruction = ReadProgramByte();
-        WriteStateLog(instruction);
+        //WriteStateLog(instruction);
         //printf("Addr: %04X, Instruction: %02X.    Next two bytes: %02X, %02X.    A: %02X, X: %02X, Y: %02X, Status: %02X\n", CCPU->PC - 1, instruction, CPUMemory[CCPU->PC], CPUMemory[CCPU->PC + 1], CCPU->Accumulator, CCPU->RegX, CCPU->RegY, CCPU->Status);
 
         /*
@@ -274,6 +276,7 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
         BGFrameBuffer[(y * 256 * 3) + (x * 3)] = (Palette_NTSC[PPURead(0x3F00U)] >> 16) & 0xFF;
         BGFrameBuffer[(y * 256 * 3) + (x * 3) + 1] = (Palette_NTSC[PPURead(0x3F00U)] >> 8) & 0xFF;
         BGFrameBuffer[(y * 256 * 3) + (x * 3) + 2] = (Palette_NTSC[PPURead(0x3F00U)]) & 0xFF;
+        BGTransBuffer[(y * 256) + x] = 0;
         return;
     }
 
@@ -360,6 +363,13 @@ void DrawBGPixelV(uint8_t x, uint8_t y) {
     BGFrameBuffer[(y * 256 * 3) + (x * 3)] = (Palette_NTSC[PPURead(paletteIndex)] >> 16) & 0xFF;
     BGFrameBuffer[(y * 256 * 3) + (x * 3) + 1] = (Palette_NTSC[PPURead(paletteIndex)] >> 8) & 0xFF;
     BGFrameBuffer[(y * 256 * 3) + (x * 3) + 2] = (Palette_NTSC[PPURead(paletteIndex)]) & 0xFF;
+
+    if (paletteIndex == 0x3F00U) {
+        BGTransBuffer[(y * 256) + x] = 0;
+    }
+    else {
+        BGTransBuffer[(y * 256) + x] = 1;
+    }
 
     if (!SPR0Data.HasHit && pixel != 0) {
         CheckSPR0Hit(x, y);
@@ -460,7 +470,10 @@ void ProcessSPR0() {
 
     for (size_t row = 0; row < 8; row++) {
         if ((actualPosY + row) > 0xEFU) {
-            break;
+            for (size_t i = 0; i < 8; i++) {
+                SPR0Data.PixelData[(row * 8) + i] = 0;
+            }
+            continue;
         }
 
         for (size_t col = 0; col < 8; col++) {
@@ -469,9 +482,9 @@ void ProcessSPR0() {
             // Pixel defines which colour value it should have from the palette, 0 - 3
             const uint8_t pixel = ((PPURead(sprOffset) >> (7 - (col % 8))) & 1) + (((PPURead(sprOffset + 8) >> (7 - (col % 8))) & 1) * 2);
 
-            uint16_t spriteXOverflow; // To catch attempts at drawing at X > 255, value is stored in a 16-bit integer first
-            uint8_t spriteX; // Dot to draw the pixel on
-            uint8_t spriteY; // Scanline to draw the pixel on
+            uint16_t spriteXOverflow; // To catch attempts at evaluating at X > 255, value is stored in a 16-bit integer first
+            uint8_t spriteX; // Dot to evaluate the pixel on
+            uint8_t spriteY; // Scanline to evaluate the pixel on
 
             uint8_t pixDataX = col;
             uint8_t pixDataY = row;
@@ -480,12 +493,12 @@ void ProcessSPR0() {
                 spriteXOverflow = spr0->PositionX + col;
             }
             else {
-                // If flipped, draw the sprite right to left
+                // If flipped, evaluate the sprite right to left
                 spriteXOverflow = (spr0->PositionX + 7) - col;
                 pixDataX = 7 - col;
             }
 
-            // If pixel would be drawn out of bounds to the right (onto the next scanline from the left), don't, and try the next pixel
+            // If pixel would be out of bounds to the right (onto the next scanline from the left), evaluate to 0 and continue
             // If flipped horizontally, valid pixels might occur in a later loop (drawing right to left), so continue instead of break
             if (spriteXOverflow > 0xFFU) {
                 SPR0Data.PixelData[(pixDataY * 8) + pixDataX] = 0;
@@ -503,15 +516,15 @@ void ProcessSPR0() {
                 spriteY = actualPosY + row;
             }
             else {
-                // If flipped, draw the sprite upside down
+                // If flipped, evaluate the sprite upside down
                 spriteY = (actualPosY + 7) - row;
                 pixDataY = 7 - row;
             }
 
-            // If pixel would be drawn below the screen, stop drawing
+            // If pixel would be drawn below the screen, evaluate to 0
             if (spriteY > 0xEFU) {
                 SPR0Data.PixelData[(pixDataY * 8) + pixDataX] = 0;
-                break;
+                continue;
             }
 
             if (pixel) {
@@ -551,6 +564,7 @@ void DrawSPR(SpriteData* spr) {
 
     bool flipH = CheckBit(spr->Attributes, SPRAttrPos_FlipH);
     bool flipV = CheckBit(spr->Attributes, SPRAttrPos_FlipV);
+    bool lowPrio = CheckBit(spr->Attributes, SPRAttrPos_Priority);
 
     for (size_t row = 0; row < 8; row++) {
         if ((actualPosY + row) > 0xEFU) {
@@ -564,7 +578,6 @@ void DrawSPR(SpriteData* spr) {
             const uint8_t pixel = ((PPURead(sprOffset) >> (7 - (col % 8))) & 1) + (((PPURead(sprOffset + 8) >> (7 - (col % 8))) & 1) * 2);
             const uint32_t paletteValue = Palette_NTSC[PPURead(paletteAddr + pixel)];
 
-            uint32_t bufferIndex;
             uint16_t spriteXOverflow; // To catch attempts at drawing at X > 255, value is stored in a 16-bit integer first
             uint8_t spriteX; // Dot to draw the pixel on
             uint8_t spriteY; // Scanline to draw the pixel on
@@ -602,7 +615,11 @@ void DrawSPR(SpriteData* spr) {
                 break;
             }
 
-            bufferIndex = (spriteY * 256 * 4) + (spriteX * 4);
+            if (lowPrio && BGTransBuffer[(spriteY * 256) + spriteX]) {
+                continue;
+            }
+
+            const uint32_t bufferIndex = (spriteY * 256 * 4) + (spriteX * 4);
 
             /*
             if (bufferIndex > (256*240*4)) {
