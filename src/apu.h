@@ -70,16 +70,40 @@ typedef struct NoiseChannel {
     bool ResetDecay;
 } NoiseChannel;
 
+typedef struct DeltaModulationChannel {
+    bool IRQEnabled;
+    bool Looping;
+    uint16_t Period; // How many CPU cycles between output levels
+    
+    uint8_t DirectOutputLoad;
+    uint16_t SampleAddress;
+    uint16_t SampleLength;
+
+    uint8_t SampleBuffer;
+
+    uint8_t MemoryReaderBuffer;
+    uint16_t MemoryReaderAddress;
+    uint16_t MemoryReaderByteCounter;
+
+    uint8_t OutputShiftRegister;
+    uint16_t OutputBitsCounter;
+    uint8_t OutputLevel; // 7-bit output level (the same one that can be loaded directly via $4011)
+    bool OutputSilenced;
+} DeltaModulationChannel;
+
 typedef struct FrameCounter {
     bool Is5StepMode;
     bool InhibitInterrupt;
     uint16_t SequenceCounter;
 } FrameCounter;
 
+extern bool EvenTick;
+
 extern APUStatus APU_Status;
 extern PulseChannel ST_SQ[2];
 extern TriangleChannel ST_TRI;
 extern NoiseChannel ST_NOISE;
+extern DeltaModulationChannel ST_DMC;
 
 extern SDL_AudioDeviceID AudioDevice;
 extern SDL_AudioStream* Stream;
@@ -88,8 +112,12 @@ extern const uint8_t DutyTable[4][8];
 extern const uint8_t LengthTable[32];
 extern const uint16_t NoiseTable_NTSC[16];
 extern const uint16_t NoiseTable_PAL[16];
+extern const uint16_t DMCPeriodTable_NTSC[16];
+extern const uint16_t DMCPeriodTable_PAL[16];
 
 void APUInit();
+void APUReset();
+void APUPostReset();
 
 void ClockAPU();
 
@@ -117,7 +145,7 @@ void UpdateTRITimer();
 
 void WriteToNOISE(uint8_t value, uint8_t byte);
 
-void WriteToNOISE(uint8_t value, uint8_t byte);
+void WriteToDMC(uint8_t value, uint8_t byte);
 
 void WriteToStatus(uint8_t value);
 void WriteToFrameCounter(uint8_t value);

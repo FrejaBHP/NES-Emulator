@@ -1,10 +1,10 @@
 #include <stdlib.h>
 #include <string.h>
-#include <console.h>
-#include <cpu.h>
-#include <ppu.h>
-#include <apu.h>
-#include <rom.h>
+#include "console.h"
+#include "cpu.h"
+#include "ppu.h"
+#include "apu.h"
+#include "rom.h"
 
 SystemType System = SYS_NTSC;
 
@@ -58,9 +58,17 @@ void SetupConsole() {
         System = SYS_PAL;
     }
 
-    BGFrameBuffer = malloc(sizeof(uint8_t) * 256 * 240 * 3);
-    BGTransBuffer = malloc(sizeof(uint8_t) * 256 * 240);
-    SPRFrameBuffer = malloc(sizeof(uint8_t) * 256 * 240 * 4);
+    if (!BGFrameBuffer) {
+        BGFrameBuffer = malloc(sizeof(uint8_t) * 256 * 240 * 3);
+    }
+    
+    if (!BGTransBuffer) {
+        BGTransBuffer = malloc(sizeof(uint8_t) * 256 * 240);
+    }
+    
+    if (!SPRFrameBuffer) {
+        SPRFrameBuffer = malloc(sizeof(uint8_t) * 256 * 240 * 4);
+    }
 }
 
 void ResetFrameCount() {

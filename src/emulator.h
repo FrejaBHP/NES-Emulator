@@ -4,8 +4,8 @@
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
-#include <cpu.h>
-#include <ppu.h>
+#include "cpu.h"
+#include "ppu.h"
 #include <stdio.h>
 
 #define Window_Height       240 * 2
@@ -27,11 +27,15 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event);
 SDL_AppResult SDL_AppIterate(void* appstate);
 void SDL_AppQuit(void* appstate, SDL_AppResult result);
 
+void SetupNMB();
 void HandleNESInput();
 
+void SDLCALL FileDialogCallback(void* userdata, const char* const* filelist, int filter);
+
 void EmulatorStart();
+void EmulatorReset();
 void Initialisation();
-void LoadROM();
+void LoadROM(const char* path);
 void ParseHeader(uint8_t* header);
 
 #endif

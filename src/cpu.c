@@ -1,8 +1,8 @@
-#include <cpu.h>
-#include <console.h>
-#include <ppu.h>
-#include <apu.h>
-#include <rom.h>
+#include "cpu.h"
+#include "console.h"
+#include "ppu.h"
+#include "apu.h"
+#include "rom.h"
 #include <stdlib.h>
 
 #define SF_Carry                    0b00000001U
@@ -587,6 +587,34 @@ void StoreAbsolute(uint16_t index, const uint8_t value) {
             CPUMemory[index] = value;
             CurPPU->DataBus = value;
             WriteToNOISE(value, 3);
+            break;
+
+        case DMC_FREQ: {
+            uint8_t write = value & 0b11001111;
+            CPUMemory[index] = write;
+            CurPPU->DataBus = value;
+            WriteToDMC(value, 0);
+            break;
+        }
+
+        case DMC_RAW: {
+            uint8_t write = value & 0b01111111;
+            CPUMemory[index] = write;
+            CurPPU->DataBus = value;
+            WriteToDMC(value, 1);
+            break;
+        }
+
+        case DMC_START:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToDMC(value, 2);
+            break;
+
+        case DMC_LEN:
+            CPUMemory[index] = value;
+            CurPPU->DataBus = value;
+            WriteToDMC(value, 3);
             break;
 
         case OAMDMA:

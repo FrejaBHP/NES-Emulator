@@ -1,6 +1,6 @@
-#include <ppu.h>
-#include <cpu.h>
-#include <rom.h>
+#include "ppu.h"
+#include "cpu.h"
+#include "rom.h"
 #include <console.h>
 #include <stdlib.h>
 
@@ -63,7 +63,15 @@ void PPUInit() {
 
 void PPUPostInit() {
     if (CurROM->MapperNumber == (uint16_t)Map_AxROM) {
-        PPUAXMem = malloc(0x400U);
+        if (!PPUAXMem) {
+            PPUAXMem = malloc(0x400U);
+        }
+    }
+    else {
+        if (PPUAXMem) {
+            free(PPUAXMem);
+            PPUAXMem = NULL;
+        }
     }
 }
 

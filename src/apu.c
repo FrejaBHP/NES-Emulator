@@ -1,6 +1,6 @@
-#include <apu.h>
-#include <console.h>
-#include <cpu.h>
+#include "apu.h"
+#include "console.h"
+#include "cpu.h"
 #include <stdbool.h>
 
 #define SQ_VOLPos_Vol0              0U
@@ -51,6 +51,7 @@ APUStatus APU_Status = { 0 };
 PulseChannel ST_SQ[2] = { 0 };
 TriangleChannel ST_TRI = { 0 };
 NoiseChannel ST_NOISE = { 0 };
+DeltaModulationChannel ST_DMC = { 0 };
 FrameCounter FC = { 0 };
 
 bool EvenTick = false;
@@ -86,6 +87,16 @@ const uint16_t NoiseTable_PAL[16] = {
     188, 236, 354, 472, 708, 944, 1890, 3778
 };
 
+const uint16_t DMCPeriodTable_NTSC[16] = {
+    428, 380, 340, 320, 286, 254, 226, 214,
+    190, 160, 142, 128, 106, 84, 72, 54
+};
+
+const uint16_t DMCPeriodTable_PAL[16] = {
+    398, 354, 316, 298, 276, 236, 210, 198,
+    176, 148, 132, 118, 98, 78, 66, 50
+};
+
 void APUInit() {
     SDL_AudioSpec aspec;
 
@@ -106,6 +117,22 @@ void APUInit() {
     }
 
     ST_NOISE.ShiftRegister = 1;
+}
+
+void APUReset() {
+    EvenTick = false;
+    ST_NOISE.ShiftRegister = 1;
+    SampleCounter = 0;
+    FC.SequenceCounter = 0;
+}
+
+void APUPostReset() {
+    if (System == SYS_NTSC) {
+        IgnoreCounterF = APUSampleDivider_NTSC;
+    }
+    else {
+        IgnoreCounterF = APUSampleDivider_PAL;
+    }
 }
 
 void ClockAPU() {
@@ -415,6 +442,44 @@ void WriteToNOISE(uint8_t value, uint8_t byte) {
 }
 
 
+void WriteToDMC(uint8_t value, uint8_t byte) {
+    switch (byte) {
+        case 0: // DMC_FREQ
+            ST_DMC.IRQEnabled = CheckBit(value, 7);
+            ST_DMC.Looping = CheckBit(value, 6);
+
+            uint8_t freqIndex = value & 0b1111;
+            if (System == SYS_NTSC) {
+                ST_DMC.Period = DMCPeriodTable_NTSC[freqIndex];
+            }
+            else {
+                ST_DMC.Period = DMCPeriodTable_PAL[freqIndex];
+            }
+
+            break;
+
+        case 1: // DMC_RAW
+            ST_DMC.DirectOutputLoad = value & 0b01111111;
+            break;
+
+        case 2: // DMC_START
+            uint16_t addr = 0b1100000000000000;
+            addr |= (value << 6);
+            ST_DMC.SampleAddress = addr;
+            break;
+
+        case 3: // DMC_LEN
+            uint16_t length = 1;
+            length |= (value << 4);
+            ST_DMC.SampleLength = length;
+            break;
+    
+        default:
+            break;
+    }
+}
+
+
 void WriteToStatus(uint8_t value) {
     const uint8_t sndchn = 0b11100000 & CPUMemory[SND_CHN];
     const uint8_t write = 0b00011111 & value;
@@ -452,6 +517,15 @@ void WriteToStatus(uint8_t value) {
         uint8_t thing = CPUMemory[NOISE_HI];
         thing &= 0b111;
         CPUMemory[NOISE_HI] = thing;
+    }
+
+    if (!APU_Status.DMCEnabled) {
+        ST_DMC.MemoryReaderByteCounter = 0; // Maybe?
+    }
+    else {
+        if (ST_DMC.MemoryReaderByteCounter == 0) {
+            ST_DMC.MemoryReaderByteCounter = ST_DMC.SampleLength;
+        }
     }
 }
 

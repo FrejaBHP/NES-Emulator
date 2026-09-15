@@ -1,9 +1,12 @@
-#include <emulator.h>
-#include <console.h>
-#include <apu.h>
-#include <rom.h>
+#include "emulator.h"
+#include "console.h"
+#include "apu.h"
+#include "rom.h"
 #include <string.h>
 #include <stdlib.h>
+#include "native_menu_bar.h"
+
+//#include <Windows.h>
 
 SDL_Window* Window = NULL;
 SDL_Renderer* Renderer = NULL;
@@ -13,9 +16,25 @@ SDL_Texture* SPRTexture = NULL;
 int DesiredFrameTime;
 uint64_t NextFrameTime = 0;
 
+const SDL_DialogFileFilter filters[] = {
+    { "NES ROM", "nes" }
+};
+
 FILE* ROMFile = NULL;
 
+const char* filePath = NULL;
+bool ROMqueued = false;
+
 uint8_t ROMLoaded = 0;
+
+nmb_Handle menuFile = NULL;
+nmb_Handle menuAudio = NULL;
+nmb_Handle mFileLoad = NULL;
+nmb_Handle mAudioMutePulse1 = NULL;
+nmb_Handle mAudioMutePulse2 = NULL;
+nmb_Handle mAudioMuteTriangle = NULL;
+nmb_Handle mAudioMuteNoise = NULL;
+nmb_Handle mAudioMuteDMC = NULL;
 
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
@@ -23,7 +42,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    if (!SDL_CreateWindowAndRenderer("NES Emulator, Maybe", Window_Width, Window_Height, SDL_WINDOW_RESIZABLE, &Window, &Renderer)) {
+    if (!SDL_CreateWindowAndRenderer("NESD", Window_Width, 20 + (Window_Height), 0, &Window, &Renderer)) {
         SDL_Log("Couldn't create window/renderer: %s", SDL_GetError());
         return SDL_APP_FAILURE;
     }
@@ -47,15 +66,12 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    /*
-    SDL_Surface* icon = SDL_LoadSurface("nesderg2.bmp");
-    SDL_SetWindowIcon(Window, icon);
-    SDL_DestroySurface(icon);
-    */
+    SetupNMB();
+    Initialisation();
 
-    EmulatorStart();
+    //EmulatorStart();
 
-    // Calculates the amount of time a frame should ideally take in nanoseconds to sustain the set framerate
+    // Calculates the amount of time a frame should ideally take in nanoseconds to sustain the set framerate. Is overridden once ROM is loaded (temp)
     if (System == SYS_NTSC) {
         DesiredFrameTime = 1000000000 / DesiredFrameRateNTSC;
     }
@@ -168,6 +184,13 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
 
 /* This function runs once per frame, and is the heart of the program. */
 SDL_AppResult SDL_AppIterate(void* appstate) {
+    nmb_Event e;
+    while (nmb_pollEvent(&e)) {
+        if (e.sender == mFileLoad) {
+            SDL_ShowOpenFileDialog(FileDialogCallback, NULL, Window, filters, 1, NULL, false);
+        }
+    }
+
     if (ROMLoaded) {
         if (!StopExecution) {
             HandleNESInput();
@@ -189,32 +212,34 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
                 SDL_Log("Execution halted\n");
             }
         }
+
+        if (!SDL_UpdateTexture(BGTexture, NULL, BGFrameBuffer, 256 * sizeof(uint8_t) * 3)) {
+            SDL_Log("Can't update BG texture: %s", SDL_GetError());
+        }
+        if (!SDL_UpdateTexture(SPRTexture, NULL, SPRFrameBuffer, 256 * sizeof(uint8_t) * 4)) {
+            SDL_Log("Can't update SPR texture: %s", SDL_GetError());
+        }
+        if (!SDL_RenderTexture(Renderer, BGTexture, NULL, NULL)) {
+            SDL_Log("Can't render BG texture: %s", SDL_GetError());
+        }
+        if (!SDL_RenderTexture(Renderer, SPRTexture, NULL, NULL)) {
+            SDL_Log("Can't render SPR texture: %s", SDL_GetError());
+        }
+        if (!SDL_RenderPresent(Renderer)) {
+            SDL_Log("Can't render present: %s", SDL_GetError());
+        }
+
+        SDL_PutAudioStreamData(Stream, SoundBuffer, SampleCounter * 2);
+
+        AlternateFrame = !AlternateFrame;
+        SampleCounter = 0;
+    }
+    else {
+        SDL_SetRenderDrawColor(Renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);  /* black, full alpha */
+        SDL_RenderClear(Renderer);  /* start with a blank canvas. */
     }
 
-    //SDL_SetRenderDrawColor(Renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);  /* black, full alpha */
-    //SDL_RenderClear(Renderer);  /* start with a blank canvas. */
     //SDL_SetRenderDrawColor(Renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);  /* white, full alpha */
-
-    if (!SDL_UpdateTexture(BGTexture, NULL, BGFrameBuffer, 256 * sizeof(uint8_t) * 3)) {
-        SDL_Log("Can't update BG texture: %s", SDL_GetError());
-    }
-    if (!SDL_UpdateTexture(SPRTexture, NULL, SPRFrameBuffer, 256 * sizeof(uint8_t) * 4)) {
-        SDL_Log("Can't update SPR texture: %s", SDL_GetError());
-    }
-    if (!SDL_RenderTexture(Renderer, BGTexture, NULL, NULL)) {
-        SDL_Log("Can't render BG texture: %s", SDL_GetError());
-    }
-    if (!SDL_RenderTexture(Renderer, SPRTexture, NULL, NULL)) {
-        SDL_Log("Can't render SPR texture: %s", SDL_GetError());
-    }
-    if (!SDL_RenderPresent(Renderer)) {
-        SDL_Log("Can't render present: %s", SDL_GetError());
-    }
-
-    SDL_PutAudioStreamData(Stream, SoundBuffer, SampleCounter * 2);
-
-    AlternateFrame = !AlternateFrame;
-    SampleCounter = 0;
 
     const uint64_t now = SDL_GetTicksNS();
 	const uint64_t executionTime = now - NextFrameTime;
@@ -225,19 +250,35 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
 
 	NextFrameTime += DesiredFrameTime;
 
+    if (ROMqueued) {
+        ROMqueued = false;
+        LoadROM(filePath);
+    }
+
     return SDL_APP_CONTINUE;  /* carry on with the program! */
 }
 
-/* This function runs once at shutdown. */
-void SDL_AppQuit(void* appstate, SDL_AppResult result) {
-    //DumpMemory();
-    //DumpPPU();
-    //DumpStateLog((size_t)result);
+void SetupNMB() {
+    // Native Menu Bar setup
+    if (nmb_getBackend() == nmb_Backend_win32) {
+        SDL_PropertiesID wprop = SDL_GetWindowProperties(Window);
+        int* hwnd = SDL_GetPointerProperty(wprop, SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
 
-    SDL_CloseAudioDevice(AudioDevice);
-    SDL_DestroyAudioStream(Stream);
-    
-    /* SDL will clean up the window/renderer for us. */
+        nmb_setup(hwnd, 0);
+    }
+    else {
+        nmb_setup(NULL, nmb_SetupFlags_createPlatformMenus);
+    }
+
+    menuFile = nmb_appendMenu(NULL, "File");
+    mFileLoad = nmb_appendMenuItem(menuFile, "Load ROM");
+
+    menuAudio = nmb_appendMenu(NULL, "Audio");
+    mAudioMutePulse1 = nmb_appendCheckMenuItem(menuAudio, "Mute Pulse 1");
+    mAudioMutePulse2 = nmb_appendCheckMenuItem(menuAudio, "Mute Pulse 2");
+    mAudioMuteTriangle = nmb_appendCheckMenuItem(menuAudio, "Mute Triangle");
+    mAudioMuteNoise = nmb_appendCheckMenuItem(menuAudio, "Mute Noise");
+    mAudioMuteDMC = nmb_appendCheckMenuItem(menuAudio, "Mute DMC");
 }
 
 void HandleNESInput() {
@@ -255,10 +296,40 @@ void HandleNESInput() {
 }
 
 void EmulatorStart() {
-    Initialisation();
-    LoadROM();
+    //Initialisation();
+    //LoadROM();
     PPUPostInit();
     SetupConsole();
+
+    // Calculates the amount of time a frame should ideally take in nanoseconds to sustain the set framerate
+    if (System == SYS_NTSC) {
+        DesiredFrameTime = 1000000000 / DesiredFrameRateNTSC;
+    }
+    else {
+        DesiredFrameTime = 1000000000 / DesiredFrameRatePAL;
+    }
+}
+
+void EmulatorReset() {
+    CCPU->SP = 0xFFU;
+
+    CurPPU->RegV = 0;
+    CurPPU->RegT = 0;
+    CurPPU->RegX = 0;
+    CurPPU->RegW = 0;
+
+    CurDot = 0;
+    CurScanline = -1;
+    CPUTimeStamp = 0;
+    CPUCycleCount = 0;
+    PPUTimeStamp = 0;
+    PPUCycleCount = 0;
+
+    APUReset();
+}
+
+void EmulatorPostReset() {
+    APUPostReset();
 }
 
 void Initialisation() {
@@ -267,13 +338,38 @@ void Initialisation() {
     PPUInit();
 }
 
-void LoadROM() {
+void SDLCALL FileDialogCallback(void* userdata, const char* const* filelist, int filter) {
+    if (!filelist) {
+        SDL_Log("An error occured: %s", SDL_GetError());
+    }
+    else if (!*filelist) {
+        SDL_Log("No file selected.");
+    }
+    else {
+        //printf("%s\n", *filelist);
+        //LoadROM(*filelist);
+        filePath = *filelist;
+        ROMqueued = true;
+    }
+}
+
+void LoadROM(const char* path) {
+    bool coldStart = true;
+
+    if (ROMLoaded) {
+        StopExecution = 1;
+        ROMLoaded = 0;
+        EmulatorReset();
+        coldStart = false;
+    }
+
     uint8_t headerBuffer[16] = { 0 };
 
-    char ROMname[] = "Super Mario Bros. (World).nes";
-
-    ROMFile = fopen(ROMname, "rb");
+    ROMFile = fopen(path, "rb");
     fread(headerBuffer, 1, sizeof(headerBuffer), ROMFile);
+    
+    char* ROMname = strrchr(path, '\\');
+    ROMname++;
 
     if (!CurROM) {
         CurROM = malloc(sizeof(ROMData));
@@ -282,6 +378,11 @@ void LoadROM() {
     ParseHeader(headerBuffer);
 
     if (CurROM->IsINES) {
+        if (ROM_PRG) {
+            free(ROM_PRG);
+            ROM_PRG = NULL;
+        }
+
         if (!ROM_PRG) {
             if (CurROM->PRG_ROM_Size < 0x80000) {
                 ROM_PRG = malloc(CurROM->PRG_ROM_Size);
@@ -292,12 +393,24 @@ void LoadROM() {
                 abort();
             }
         }
+
+        if (ROM_CHR) {
+            free(ROM_CHR);
+            ROM_CHR = NULL;
+        }
+
         if (!ROM_CHR) {
             if (CurROM->CHR_ROM_Size == 0 && CurROM->CHR_RAM_Size != 0) {
+                if (ROM_CHR) {
+                    free(ROM_CHR);
+                }
                 ROM_CHR = malloc(CurROM->CHR_RAM_Size);
                 fread(ROM_CHR, 1, CurROM->CHR_RAM_Size, ROMFile);
             }
             else if (CurROM->CHR_ROM_Size < 0x40000) {
+                if (ROM_CHR) {
+                    free(ROM_CHR);
+                }
                 ROM_CHR = malloc(CurROM->CHR_ROM_Size);
                 fread(ROM_CHR, 1, CurROM->CHR_ROM_Size, ROMFile);
             }
@@ -308,25 +421,20 @@ void LoadROM() {
         }
 
         if (CurROM->PRG_ROM_Size == 0x4000U) {
-            //fread(&CPUMemory[ROM_Start + 0x4000U], 1, 0x4000U, ROMFile);
             memcpy(&CPUMemory[ROM_Start + 0x4000U], ROM_PRG, 0x4000U);
         }
         else if (CurROM->PRG_ROM_Size == 0x8000U) {
-            //fread(&CPUMemory[ROM_Start], 1, 0x8000U, ROMFile);
             memcpy(&CPUMemory[ROM_Start], ROM_PRG, 0x8000U);
         }
         else {
-            //fread(&CPUMemory[ROM_Start], 1, 0x8000U, ROMFile);
             memcpy(&CPUMemory[ROM_Start], ROM_PRG, 0x8000U);
         }
 
         if (CurROM->CHR_ROM_Size == 0x2000U) {
             memcpy(&PPUMemory[0], ROM_CHR, 0x2000U);
-            //fread(&PPUMemory[0], 1, 0x2000U, ROMFile);
         }
         else {
             memcpy(&PPUMemory[0], ROM_CHR, 0x2000U);
-            //fread(&PPUMemory[0], 1, 0x2000U, ROMFile);
         }
 
         CCPU->PC = AssembleAbsoluteAddress(CPUMemory[0xFFFC], CPUMemory[0xFFFD]);
@@ -334,12 +442,23 @@ void LoadROM() {
 
     fclose(ROMFile);
 
+    EmulatorStart();
     ROMLoaded = 1;
 
-    // Probably should bounds check this eventually, as a precaution
+    if (!coldStart) {
+        EmulatorPostReset();
+        StopExecution = 0;
+    }
+
     char appName[128] = "NESD  -  ";
     ROMname[strlen(ROMname) - 4] = '\0';
-    strcat(appName, ROMname);
+
+    if (strlen(ROMname) > 100) {
+        strncat(appName, ROMname, 100);
+    }
+    else {
+        strcat(appName, ROMname);
+    }
 
     if (CurROM->TimingMode == TMode_RP2C07) {
         strcat(appName, " [PAL]");
@@ -379,4 +498,17 @@ void ParseHeader(uint8_t* header) {
 
         printf("PRG_ROM Size: %uB, CHR_ROM Size: %uB, CHR_RAM Size: %uB\n", CurROM->PRG_ROM_Size, CurROM->CHR_ROM_Size, CurROM->CHR_RAM_Size);
     }
+}
+
+/* This function runs once at shutdown. */
+void SDL_AppQuit(void* appstate, SDL_AppResult result) {
+    //DumpMemory();
+    //DumpPPU();
+    //DumpStateLog((size_t)result);
+
+    SDL_CloseAudioDevice(AudioDevice);
+    SDL_DestroyAudioStream(Stream);
+    nmb_shutdown();
+    
+    /* SDL will clean up the window/renderer for us. */
 }
